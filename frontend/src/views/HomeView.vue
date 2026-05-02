@@ -1,9 +1,10 @@
 <script setup>
-import TheWelcome from '../components/TheWelcome.vue'
+import BannerConponent from '../components/BannerConponent.vue'
+
 </script>
 
 <template>
   <main>
-    <TheWelcome />
+    <BannerConponent />
   </main>
 </template>
