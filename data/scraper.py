@@ -1,86 +1,218 @@
-import os
 import json
+import os
+import time
+from urllib.parse import parse_qsl, urlencode, urlparse
+
 import requests
 from bs4 import BeautifulSoup
-import google.generativeai as genai
-from dotenv import load_dotenv
 
-# 載入 .env 檔案中的環境變數
-load_dotenv()
+try:
+    from pipeline_paths import RAW_DOCUMENTS_PATH
+except ImportError:
+    from data.pipeline_paths import RAW_DOCUMENTS_PATH
 
-# ==========================================
-# 1. API 金鑰與環境設定
-# ==========================================
-# 透過 os.getenv 安全地取得 API Key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+BASE_URL = "https://t-navi.city.taito.lg.jp"
+LIST_URL = f"{BASE_URL}/spot?categoryIds=6,7,8,9,10,11,12,13,14,15,16"
+ALLOWED_DOMAIN = "t-navi.city.taito.lg.jp"
+MAX_PAGES = 3
+MAX_SPOTS = 50
+RAW_OUTPUT_PATH = RAW_DOCUMENTS_PATH
 
-# 初始化 Gemini 模型
-model = genai.GenerativeModel('gemini-pro')
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
 
-# ==========================================
-# 2. 模擬爬蟲抓取日文網站資料
-# ==========================================
-def scrape_japanese_tourism_site(url):
-    print(f"開始抓取目標網站: {url}")
-    # 這裡為爬蟲雛形，實際情況可依照目標網站的 HTML 結構調整
-    # response = requests.get(url)
-    # soup = BeautifulSoup(response.text, 'html.parser')
-    # text_content = soup.get_text()
-    
-    # 為了測試，我們在此先模擬一段從日本觀光網站抓下來的非結構化日文介紹
-    sample_japanese_text = """
-    谷中銀座にある築80年の古民家を改装したカフェ。
-    地元のフェアトレード珈琲豆を使用し、使い捨てプラスチックを一切使用していません。
-    昭和のレトロな雰囲気を楽しみながら、下町の文化を体験できます。
-    アクセス：千代田線千駄木駅から徒歩5分。
-    """
-    return sample_japanese_text
 
-# ==========================================
-# 3. 透過 Gemini 進行翻譯、清洗與標籤化
-# ==========================================
-def process_data_with_llm(raw_text):
-    print("正在將資料交由 Gemini 進行翻譯與 SDG 標籤盤點...")
-    
-    prompt = f"""
-    你現在是一位熟悉聯合國永續發展目標(SDGs)的日本觀光翻譯專家。
-    請閱讀以下從日本觀光網站抓取的非結構化日文資料，幫我完成以下任務：
-    1. 將內容翻譯為繁體中文，寫成一段吸引人的景點描述。
-    2. 根據內文，從以下標籤中挑選符合的 SDG 指標：['老屋活化', '支持在地商店街', '環境友善', '文化體驗']。
-    3. 萃取交通方式。
-    4. 嚴格以 JSON 格式輸出，不要包含其他多餘的文字。
+def is_external(url: str) -> bool:
+    parsed = urlparse(url)
+    return bool(parsed.netloc) and parsed.netloc != ALLOWED_DOMAIN
 
-    JSON 格式範例：
-    {{
-      "name": "請自行為景點取個合適的中文名稱",
-      "description": "翻譯並潤飾後的描述",
-      "access": "交通方式",
-      "tags": ["標籤1", "標籤2"]
-    }}
 
-    待處理日文資料：
-    {raw_text}
-    """
-    
-    response = model.generate_content(prompt)
-    return response.text
+def normalize_url(href: str) -> str:
+    if href.startswith("http"):
+        return href
+    return BASE_URL + href
 
-# ==========================================
-# 4. 主程式執行區
-# ==========================================
+
+def build_google_map_embed_url(url: str) -> str:
+    parsed = urlparse(url)
+    query_params = dict(parse_qsl(parsed.query))
+    location = query_params.get("q") or query_params.get("center")
+    if not location:
+        return ""
+    return f"https://www.google.com/maps?{urlencode({'q': location, 'output': 'embed'})}"
+
+
+def find_next_page(soup: BeautifulSoup, current_page: int) -> str | None:
+    pagination = soup.find(class_="pagination")
+    if not pagination:
+        return None
+
+    for a_tag in pagination.find_all("a"):
+        if a_tag.get_text(strip=True) == str(current_page + 1):
+            href = a_tag.get("href", "")
+            return href if href.startswith("http") else BASE_URL + href
+
+    return None
+
+
+def parse_spots_from_page(soup: BeautifulSoup) -> list[dict]:
+    spots = []
+    for title_el in soup.find_all(class_="post-title"):
+        a_tag = title_el.find("a")
+        if not a_tag:
+            continue
+
+        name_jp = a_tag.get_text(strip=True)
+        detail_url = normalize_url(a_tag.get("href", ""))
+
+        image_url = ""
+        parent = title_el.parent
+        while parent:
+            img_wrapper = parent.find(class_="post-image")
+            if img_wrapper:
+                img_tag = img_wrapper.find("img")
+                if img_tag:
+                    raw = (
+                        img_tag.get("src")
+                        or img_tag.get("data-src")
+                        or img_tag.get("data-lazy-src")
+                        or ""
+                    )
+                    if raw:
+                        image_url = normalize_url(raw)
+                break
+            parent = parent.parent
+
+        spots.append(
+            {
+                "category": "spot",
+                "name_jp": name_jp,
+                "detail_url": detail_url,
+                "image_url": image_url,
+                "google_map_url": "",
+                "food_categories": [],
+                "source_category_url": LIST_URL,
+            }
+        )
+
+    return spots
+
+
+def fetch_spot_list(
+    max_pages: int | None = MAX_PAGES, max_spots: int | None = MAX_SPOTS
+) -> list[dict]:
+    all_spots = []
+    current_url = LIST_URL
+    page_num = 1
+
+    while True:
+        print(f"正在取得第 {page_num} 頁：{current_url}")
+        resp = requests.get(current_url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        page_spots = parse_spots_from_page(soup)
+        print(f"  本頁找到 {len(page_spots)} 筆景點")
+        all_spots.extend(page_spots)
+        if max_spots is not None and len(all_spots) >= max_spots:
+            all_spots = all_spots[:max_spots]
+            break
+
+        if max_pages is not None and page_num >= max_pages:
+            break
+
+        next_url = find_next_page(soup, page_num)
+        if not next_url:
+            print(f"  第 {page_num} 頁已是最後一頁，停止翻頁")
+            break
+
+        current_url = next_url
+        page_num += 1
+        time.sleep(2)
+
+    print(f"共取得 {len(all_spots)} 筆景點")
+    return all_spots
+
+
+def fetch_spot_detail(url: str) -> dict | None:
+    if is_external(url):
+        print(f"  [略過] 連結本身為外部網域：{url}")
+        return None
+
+    try:
+        resp = requests.get(url, headers=HEADERS, allow_redirects=True, timeout=15)
+        resp.raise_for_status()
+
+        final_url = resp.url
+        if is_external(final_url):
+            print(f"  [略過] 重新導向至外部網域：{final_url}")
+            return None
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        desc_el = soup.find(class_="spot-description")
+        map_iframe = soup.select_one(".post-map-iframe iframe")
+        map_url = map_iframe.get("src", "") if map_iframe else ""
+
+        return {
+            "description_jp": desc_el.get_text(separator="\n", strip=True)
+            if desc_el
+            else "",
+            "google_map_url": build_google_map_embed_url(map_url) if map_url else "",
+        }
+
+    except requests.RequestException as e:
+        print(f"  [錯誤] 無法取得詳細頁面：{e}")
+        return None
+
+
+def load_json(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_json(path: str, records: list[dict]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+
+
+def main() -> None:
+    raw_records = load_json(RAW_OUTPUT_PATH)
+    done_urls = {record["detail_url"] for record in raw_records}
+    print(f"載入既有 raw 資料：{len(raw_records)} 筆")
+
+    spots = fetch_spot_list(MAX_PAGES, MAX_SPOTS)
+    pending = [spot for spot in spots if spot["detail_url"] not in done_urls]
+    print(f"待爬取詳細資料：{len(pending)} 筆（已完成 {len(done_urls)} 筆）")
+
+    for idx, spot in enumerate(pending, start=1):
+        print(f"\n[{idx}/{len(pending)}] {spot['name_jp']}")
+        print(f"  URL：{spot['detail_url']}")
+
+        time.sleep(2)
+        detail = fetch_spot_detail(spot["detail_url"])
+        if detail is None:
+            print("  -> 已略過")
+            continue
+
+        record = {
+            **spot,
+            "description_jp": detail["description_jp"],
+            "google_map_url": detail["google_map_url"],
+        }
+        raw_records.append(record)
+        save_json(RAW_OUTPUT_PATH, raw_records)
+        print(f"  -> 已寫入 raw_documents.json，介紹字數：{len(record['description_jp'])}")
+
+    print(f"\n爬取完成，共 {len(raw_records)} 筆 raw document 儲存至 {RAW_OUTPUT_PATH}")
+
+
 if __name__ == "__main__":
-    # 目標：針對台東區（如谷根千、淺草周邊）抓取 15-20 筆資料
-    target_url = "https://example-tokyo-tourism.jp/yanaka"
-    
-    # 步驟 A：擷取非結構化資料
-    raw_data = scrape_japanese_tourism_site(target_url)
-    
-    # 步驟 B：透過 LLM 清洗並轉換為 JSON 格式
-    clean_json_data = process_data_with_llm(raw_data)
-    
-    print("\n✅ 資料清洗與轉換完成！符合系統所需的 JSON 結構如下：")
-    print(clean_json_data)
-    
-    # 步驟 C：(未來將加上寫入 MongoDB 的程式碼)
-    # TODO: 連線至 MongoDB 並將 BSON/JSON 寫入
+    main()

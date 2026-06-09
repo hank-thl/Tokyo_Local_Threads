@@ -1,0 +1,22 @@
+[project]
+name = "tokyo-local-threads"
+version = "0.1.0"
+description = "共生東京：觀光分流與在地創生導覽網的 Python backend and data pipeline."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4",
+    "flask",
+    "flask-cors",
+    "flask-socketio",
+    "google-genai",
+    "langchain",
+    "langchain-google-genai",
+    "dnspython",
+    "pymongo",
+    "python-dotenv",
+    "requests",
+]
+
+[tool.uv]
+package = false

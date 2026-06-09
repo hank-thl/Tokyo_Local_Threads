@@ -2,32 +2,26 @@
 import { ref, computed } from 'vue'
 import SpotCard from './SpotCard.vue'
 import SpotModal from './SpotModal.vue'
+import rawSpotsData from '@data/taito_documents.json'
 
 const tabs = ref(['全部', '老屋活化', '支持在地商店街', '環境友善', '文化體驗'])
 const activeTab = ref('全部')
 const isModalVisible = ref(false)
 const selectedSpot = ref({})
 
-const spotsData = ref([
-  {
-    id: 1,
-    name: '谷根千老屋咖啡',
-    description: '位於谷中銀座附近的傳統老屋改建咖啡廳，保留了昭和時代的建築特色，提供在地烘焙的公平貿易咖啡，讓旅客深入體驗下町風情。',
-    access: '搭乘千代田線至「千駄木站」，步行約5分鐘。',
-    image: 'https://images.unsplash.com/photo-1528360354687-83ebedab298c?q=80&w=1000&auto=format&fit=crop',
-    map: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3238.9!2d139.76!3d35.72!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMzXCsDQzJzEyLjAiTiAxMznCsDQ1JzM2LjAiRQ!5e0!3m2!1szh-TW!2stw!4v1715840000000!5m2!1szh-TW!2stw',
-    tags: ['老屋活化', '支持在地商店街']
-  },
-  {
-    id: 2,
-    name: '淺草環保文化旅宿',
-    description: '距離淺草寺步行十分鐘的環保旅宿，全館使用太陽能與雨水回收系統，並提供周邊深度文化徒步導覽，將客流引導至更具在地故事的街區。',
-    access: '搭乘銀座線至「淺草站」，步行約10分鐘。',
-    image: 'https://images.unsplash.com/photo-1542051812871-757505937d98?q=80&w=1000&auto=format&fit=crop',
-    map: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3239.1!2d139.79!3d35.71!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMzXCsDQyJzM2LjAiTiAxMznCsDQ3JzI0LjAiRQ!5e0!3m2!1szh-TW!2stw!4v1715840000001!5m2!1szh-TW!2stw',
-    tags: ['環境友善', '文化體驗']
-  }
-])
+const spotsData = ref(
+  rawSpotsData.map((spot, index) => {
+    return {
+      id: index + 1, // 自動賦予一個流水號 ID (給 Vue 的 v-for :key 使用)
+      name: spot.name.zh || spot.name.jp, // 優先顯示中文名稱，沒有就用日文
+      description: spot.ui_description.zh || '暫無中文介紹', 
+      access: '詳細交通請參考官網', // 爬蟲目前沒抓這項，先給個預設值
+      image: spot.image_url || 'https://via.placeholder.com/1000x600?text=No+Image', // 如果沒圖片給個預設圖
+      map: spot.google_map_url || '',
+      tags: spot.sdg_tags || [] // 直接套用 Gemini 幫我們打好的標籤！
+    }
+  })
+);
 
 const filteredSpots = computed(() => {
   if (activeTab.value === '全部') {
