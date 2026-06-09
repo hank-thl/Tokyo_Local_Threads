@@ -20,7 +20,18 @@ defineEmits(['open-modal'])
     
     <div class="w-[60%] p-6 flex flex-col justify-between">
       <div>
-        <h3 class="text-2xl font-bold text-gray-800 mb-2">{{ spot.name }}</h3>
+        <div class="mb-2">
+          <h3 class="text-2xl font-bold text-gray-800">{{ spot.nameZh || spot.name }}</h3>
+          <p
+            v-if="spot.nameJp && spot.nameJp !== spot.nameZh"
+            class="mt-1 flex items-center gap-2 text-sm italic tracking-wide text-gray-500"
+          >
+            <span class="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[0.65rem] font-semibold not-italic tracking-normal text-gray-400">
+              JP
+            </span>
+            <span>{{ spot.nameJp }}</span>
+          </p>
+        </div>
         <p class="text-gray-600 mb-5 leading-relaxed line-clamp-3">{{ spot.description }}</p>
       </div>
       

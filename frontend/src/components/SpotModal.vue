@@ -21,7 +21,18 @@ defineEmits(['close'])
       </button>
 
       <div class="w-full md:w-[55%] p-6 md:p-8">
-        <h3 class="text-[1.8rem] font-bold text-gray-900 mb-4">{{ spot.name }}</h3>
+        <div class="mb-4">
+          <h3 class="text-[1.8rem] font-bold text-gray-900">{{ spot.nameZh || spot.name }}</h3>
+          <p
+            v-if="spot.nameJp && spot.nameJp !== spot.nameZh"
+            class="mt-1 flex items-center gap-2 text-base italic tracking-wide text-gray-500"
+          >
+            <span class="rounded border border-gray-200 bg-gray-100 px-1.5 py-0.5 text-[0.7rem] font-semibold not-italic tracking-normal text-gray-400">
+              JP
+            </span>
+            <span>{{ spot.nameJp }}</span>
+          </p>
+        </div>
         <img :src="spot.image" :alt="spot.name" class="w-full h-[260px] object-cover rounded-[14px] mb-4" />
         <p class="text-gray-700 leading-[1.8]">{{ spot.description }}</p>
       </div>

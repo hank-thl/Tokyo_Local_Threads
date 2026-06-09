@@ -1,27 +1,50 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import SpotCard from './SpotCard.vue'
 import SpotModal from './SpotModal.vue'
-import rawSpotsData from '@data/taito_documents.json'
+import { fetchDocuments, fetchSdgTags } from '@/services/api'
 
-const tabs = ref(['全部', '老屋活化', '支持在地商店街', '環境友善', '文化體驗'])
+const tabs = ref(['全部'])
 const activeTab = ref('全部')
 const isModalVisible = ref(false)
 const selectedSpot = ref({})
+const isLoading = ref(true)
+const errorMessage = ref('')
+const spotsData = ref([])
 
-const spotsData = ref(
-  rawSpotsData.map((spot, index) => {
-    return {
-      id: index + 1, // 自動賦予一個流水號 ID (給 Vue 的 v-for :key 使用)
-      name: spot.name.zh || spot.name.jp, // 優先顯示中文名稱，沒有就用日文
-      description: spot.ui_description.zh || '暫無中文介紹', 
-      access: '詳細交通請參考官網', // 爬蟲目前沒抓這項，先給個預設值
-      image: spot.image_url || 'https://via.placeholder.com/1000x600?text=No+Image', // 如果沒圖片給個預設圖
-      map: spot.google_map_url || '',
-      tags: spot.sdg_tags || [] // 直接套用 Gemini 幫我們打好的標籤！
-    }
-  })
-);
+const mapDocumentToSpot = (document, index) => {
+  return {
+    id: document._id || index + 1,
+    name: document.name?.zh || document.name?.jp || '未命名景點',
+    nameZh: document.name?.zh || '',
+    nameJp: document.name?.jp || '',
+    description: document.ui_description?.zh || '暫無中文介紹',
+    access: '詳細交通請參考官網',
+    image: document.image_url || 'https://via.placeholder.com/1000x600?text=No+Image',
+    map: document.google_map_url || '',
+    tags: document.sdg_tags || []
+  }
+}
+
+const loadData = async () => {
+  isLoading.value = true
+  errorMessage.value = ''
+
+  try {
+    const [documents, sdgTags] = await Promise.all([
+      fetchDocuments({ limit: 100 }),
+      fetchSdgTags()
+    ])
+
+    tabs.value = ['全部', ...sdgTags]
+    spotsData.value = documents.map(mapDocumentToSpot)
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = '無法取得景點資料，請確認 Flask 後端是否已啟動。'
+  } finally {
+    isLoading.value = false
+  }
+}
 
 const filteredSpots = computed(() => {
   if (activeTab.value === '全部') {
@@ -34,6 +57,8 @@ const openSpotModal = (spot) => {
   selectedSpot.value = spot
   isModalVisible.value = true
 }
+
+onMounted(loadData)
 </script>
 
 <template>
@@ -53,7 +78,15 @@ const openSpotModal = (spot) => {
     </div>
 
     <section>
-      <div v-if="filteredSpots.length > 0" class="flex flex-col gap-6">
+      <div v-if="isLoading" class="py-20 text-center text-gray-500 text-lg">
+        資料載入中...
+      </div>
+
+      <div v-else-if="errorMessage" class="py-20 text-center text-red-500 text-lg">
+        {{ errorMessage }}
+      </div>
+
+      <div v-else-if="filteredSpots.length > 0" class="flex flex-col gap-6">
         <SpotCard
           v-for="spot in filteredSpots"
           :key="spot.id"
