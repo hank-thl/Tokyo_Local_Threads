@@ -16,6 +16,8 @@ dependencies = [
     "pymongo",
     "python-dotenv",
     "requests",
+    "langchain-community>=0.4.2",
+    "langchain-mongodb>=0.11.0",
 ]
 
 [tool.uv]
