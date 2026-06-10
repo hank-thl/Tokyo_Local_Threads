@@ -1,9 +1,12 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import SpotCard from './SpotCard.vue'
 import SpotModal from './SpotModal.vue'
 import { fetchDocuments, fetchSdgTags } from '@/services/api'
 
+const route = useRoute()
+const router = useRouter()
 const tabs = ref(['全部'])
 const activeTab = ref('全部')
 const isModalVisible = ref(false)
@@ -55,12 +58,43 @@ const filteredSpots = computed(() => {
   return spotsData.value.filter(spot => spot.tags.includes(activeTab.value))
 })
 
-const openSpotModal = (spot) => {
-  selectedSpot.value = spot
+const syncModalWithRoute = () => {
+  const spotId = route.params.spotId
+  if (!spotId) {
+    isModalVisible.value = false
+    selectedSpot.value = {}
+    return
+  }
+
+  const matchedSpot = spotsData.value.find(spot => spot.id === spotId)
+  if (!matchedSpot) return
+
+  selectedSpot.value = matchedSpot
   isModalVisible.value = true
 }
 
-onMounted(loadData)
+const openSpotModal = (spot) => {
+  router.push({
+    name: 'spot-detail',
+    params: {
+      spotId: spot.id
+    }
+  })
+}
+
+const closeSpotModal = () => {
+  router.push({ name: 'home' })
+}
+
+watch(
+  () => route.params.spotId,
+  syncModalWithRoute
+)
+
+onMounted(async () => {
+  await loadData()
+  syncModalWithRoute()
+})
 </script>
 
 <template>
@@ -106,7 +140,7 @@ onMounted(loadData)
     <SpotModal 
       :is-open="isModalVisible" 
       :spot="selectedSpot" 
-      @close="isModalVisible = false" 
+      @close="closeSpotModal" 
     />
   </div>
 </template>

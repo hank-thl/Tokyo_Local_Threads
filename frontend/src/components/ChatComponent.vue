@@ -1,6 +1,8 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
+import { fetchDocuments } from '@/services/api'
 
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
@@ -9,6 +11,7 @@ const SOCKET_URL =
 
 const STORAGE_KEY = 'tokyo_local_threads_session_id'
 
+const router = useRouter()
 const isOpen = ref(false)
 const inputText = ref('')
 const isLoading = ref(false)
@@ -17,6 +20,7 @@ const chatBodyRef = ref(null)
 const socket = ref(null)
 const sessionId = ref('')
 const lastAiText = ref('')
+const spotLinks = ref([])
 const messages = ref([
   {
     sender: 'ai',
@@ -51,13 +55,72 @@ const escapeHtml = (text) => {
     .replace(/'/g, '&#039;')
 }
 
+const buildSpotLinks = async () => {
+  try {
+    const documents = await fetchDocuments({ limit: 100 })
+    const links = []
+
+    documents.forEach((document) => {
+      const id = document._id
+      const names = [document.name?.zh, document.name?.jp].filter(Boolean)
+
+      names.forEach((name) => {
+        if (name.length < 2) return
+        links.push({
+          name,
+          escapedName: escapeHtml(name),
+          id,
+        })
+      })
+    })
+
+    spotLinks.value = links.sort((a, b) => b.escapedName.length - a.escapedName.length)
+  } catch (error) {
+    console.error('無法建立聊天景點連結索引', error)
+  }
+}
+
+const linkSpotNames = (escapedText) => {
+  let output = ''
+  let index = 0
+
+  while (index < escapedText.length) {
+    const matchedSpot = spotLinks.value.find((spot) =>
+      escapedText.startsWith(spot.escapedName, index)
+    )
+
+    if (matchedSpot) {
+      output += `<a href="/spot/${matchedSpot.id}" data-spot-id="${matchedSpot.id}" class="chat-spot-link">${matchedSpot.escapedName}</a>`
+      index += matchedSpot.escapedName.length
+    } else {
+      output += escapedText[index]
+      index += 1
+    }
+  }
+
+  return output
+}
+
 const formatMessage = (text) => {
-  return escapeHtml(text)
+  return linkSpotNames(escapeHtml(text))
     .replace(/^### (.+)$/gm, '<div class="chat-heading">$1</div>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/^\* (.+)$/gm, '<div class="chat-list-item">• $1</div>')
     .replace(/^- (.+)$/gm, '<div class="chat-list-item">• $1</div>')
     .replace(/\n/g, '<br>')
+}
+
+const handleMessageClick = (event) => {
+  const link = event.target.closest('[data-spot-id]')
+  if (!link) return
+
+  event.preventDefault()
+  router.push({
+    name: 'spot-detail',
+    params: {
+      spotId: link.dataset.spotId,
+    },
+  })
 }
 
 const pushAiMessage = (text) => {
@@ -136,6 +199,7 @@ watch(isLoading, scrollToBottom)
 onMounted(() => {
   sessionId.value = getOrCreateSessionId()
   connectSocket()
+  buildSpotLinks()
 })
 
 onUnmounted(() => {
@@ -174,7 +238,7 @@ onUnmounted(() => {
           </button>
         </header>
 
-        <div ref="chatBodyRef" class="flex-1 overflow-y-auto bg-gray-50 p-5">
+        <div ref="chatBodyRef" class="flex-1 overflow-y-auto bg-gray-50 p-5" @click="handleMessageClick">
           <div class="flex flex-col gap-4">
             <div
               v-for="(msg, index) in messages"
@@ -281,5 +345,16 @@ onUnmounted(() => {
 :deep(.chat-list-item) {
   margin-top: 0.25rem;
   padding-left: 0.15rem;
+}
+
+:deep(.chat-spot-link) {
+  font-weight: 700;
+  color: #047857;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+:deep(.chat-spot-link:hover) {
+  color: #065f46;
 }
 </style>
