@@ -16,8 +16,8 @@ BASE_URL = "https://t-navi.city.taito.lg.jp"
 CATEGORY_URL = f"{BASE_URL}/restaurant"
 RAW_OUTPUT_PATH = RAW_DOCUMENTS_PATH
 
-MAX_PAGES_PER_CATEGORY = 1
-MAX_RESTAURANTS_PER_CATEGORY = 5
+MAX_PAGES_PER_CATEGORY = None
+MAX_RESTAURANTS_PER_CATEGORY = None
 REQUEST_DELAY_SECONDS = 2
 
 HEADERS = {
@@ -187,17 +187,24 @@ def fetch_restaurants_for_category(
         )
         soup = fetch_soup(session, current_url)
         page_restaurants = parse_restaurants_from_list_page(soup, food_category)
-        remaining = MAX_RESTAURANTS_PER_CATEGORY - len(restaurants)
-        if remaining <= 0:
-            break
-        page_restaurants = page_restaurants[:remaining]
+        if MAX_RESTAURANTS_PER_CATEGORY is not None:
+            remaining = MAX_RESTAURANTS_PER_CATEGORY - len(restaurants)
+            if remaining <= 0:
+                break
+            page_restaurants = page_restaurants[:remaining]
         print(f"  本頁找到 {len(page_restaurants)} 間餐廳", flush=True)
         restaurants.extend(page_restaurants)
 
-        if len(restaurants) >= MAX_RESTAURANTS_PER_CATEGORY:
+        if (
+            MAX_RESTAURANTS_PER_CATEGORY is not None
+            and len(restaurants) >= MAX_RESTAURANTS_PER_CATEGORY
+        ):
             break
 
-        if page_num >= MAX_PAGES_PER_CATEGORY:
+        if (
+            MAX_PAGES_PER_CATEGORY is not None
+            and page_num >= MAX_PAGES_PER_CATEGORY
+        ):
             break
 
         next_url = find_next_page(soup, page_num)
@@ -251,8 +258,8 @@ def main() -> None:
     print("共生東京資料管線 Step 1B：餐廳爬蟲", flush=True)
     print("=" * 60, flush=True)
     print(f"起始分類 URL：{CATEGORY_URL}", flush=True)
-    print(f"每分類最大頁數：{MAX_PAGES_PER_CATEGORY}", flush=True)
-    print(f"每分類最大餐廳數：{MAX_RESTAURANTS_PER_CATEGORY}", flush=True)
+    print(f"每分類最大頁數：{MAX_PAGES_PER_CATEGORY or '不限'}", flush=True)
+    print(f"每分類最大餐廳數：{MAX_RESTAURANTS_PER_CATEGORY or '不限'}", flush=True)
     print(f"輸出檔案：{RAW_OUTPUT_PATH}", flush=True)
 
     session = requests.Session()

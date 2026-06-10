@@ -14,8 +14,8 @@ except ImportError:
 BASE_URL = "https://t-navi.city.taito.lg.jp"
 LIST_URL = f"{BASE_URL}/spot?categoryIds=6,7,8,9,10,11,12,13,14,15,16"
 ALLOWED_DOMAIN = "t-navi.city.taito.lg.jp"
-MAX_PAGES = 3
-MAX_SPOTS = 50
+MAX_PAGES = None
+MAX_SPOTS = None
 RAW_OUTPUT_PATH = RAW_DOCUMENTS_PATH
 
 HEADERS = {
@@ -188,8 +188,8 @@ def main() -> None:
     print("共生東京資料管線 Step 1A：景點爬蟲")
     print("=" * 60)
     print(f"起始列表 URL：{LIST_URL}")
-    print(f"最大頁數：{MAX_PAGES}")
-    print(f"最大景點數：{MAX_SPOTS}")
+    print(f"最大頁數：{MAX_PAGES or '不限'}")
+    print(f"最大景點數：{MAX_SPOTS or '不限'}")
     print(f"輸出檔案：{RAW_OUTPUT_PATH}")
 
     raw_records = load_json(RAW_OUTPUT_PATH)
