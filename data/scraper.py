@@ -14,8 +14,8 @@ except ImportError:
 BASE_URL = "https://t-navi.city.taito.lg.jp"
 LIST_URL = f"{BASE_URL}/spot?categoryIds=6,7,8,9,10,11,12,13,14,15,16"
 ALLOWED_DOMAIN = "t-navi.city.taito.lg.jp"
-MAX_PAGES = None
-MAX_SPOTS = None
+MAX_PAGES = 3
+MAX_SPOTS = 50
 RAW_OUTPUT_PATH = RAW_DOCUMENTS_PATH
 
 HEADERS = {
