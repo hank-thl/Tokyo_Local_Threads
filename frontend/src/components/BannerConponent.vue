@@ -17,15 +17,15 @@ const bgImage = ref('https://images.unsplash.com/photo-1549693578-d683be217e58')
 
     <div class="relative z-10 max-w-[520px]">
       <span class="inline-block px-3.5 py-1.5 mb-4 text-sm tracking-[2px] rounded-full bg-white/15">
-        TOKYO TRAVEL GUIDE
+        TOKYO LOCAL THREADS
       </span>
 
       <h1 class="my-2.5 text-[3.5rem] tracking-[2px] font-bold">
-        東京旅遊導覽
+        共生東京：永續旅遊新實踐
       </h1>
 
       <p class="mb-[30px] text-[1.2rem] leading-[1.8] text-[#f0f0f0]">
-        探索文化 · 景點 · 美食 · 城市魅力
+        避開擁擠人潮 · 支持在地社區 · 探索未知的東京角落
       </p>
     </div>
   </header>

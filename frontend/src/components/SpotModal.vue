@@ -1,5 +1,7 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   spot: {
     type: Object,
     default: () => ({})
@@ -11,6 +13,35 @@ defineProps({
 })
 
 defineEmits(['close'])
+
+const crowdLevel = computed(() => {
+  const level = Number(props.spot.crowdLevel || 1)
+  return Math.min(Math.max(level, 1), 5)
+})
+
+const crowdIcon = computed(() => {
+  if (crowdLevel.value <= 1) {
+    return '/icons/crowd-level-1.png'
+  }
+
+  if (crowdLevel.value <= 3) {
+    return '/icons/crowd-level-2.png'
+  }
+
+  return '/icons/crowd-level-3.png'
+})
+
+const crowdLabel = computed(() => {
+  if (crowdLevel.value <= 1) {
+    return '低人潮秘境'
+  }
+
+  if (crowdLevel.value <= 3) {
+    return '中度人潮'
+  }
+
+  return '高人潮區域'
+})
 </script>
 
 <template>
@@ -38,8 +69,24 @@ defineEmits(['close'])
       </div>
 
       <div class="w-full md:w-[45%] p-6 md:p-8 bg-gray-50 border-t md:border-t-0 md:border-l border-gray-100">
-        <h4 class="text-[1.1rem] font-bold text-[#e60023] mb-2.5">🚇 如何抵達</h4>
-        <p class="bg-[#f6f6f6] p-4 rounded-xl text-gray-700 mb-6">{{ spot.access }}</p>
+        <h4 class="text-[1.1rem] font-bold text-[#e60023] mb-2.5">⚡ 觀光人潮避雷針</h4>
+        <div class="bg-white border border-gray-100 p-4 rounded-xl text-gray-700 mb-6">
+          <div class="flex items-center gap-4">
+            <img
+              v-if="crowdIcon"
+              :src="crowdIcon"
+              :alt="crowdLabel"
+              class="h-14 w-14 shrink-0 object-contain"
+            />
+            <div>
+              <p class="text-sm font-semibold text-gray-500">擁擠程度 {{ crowdLevel }} / 5</p>
+              <p class="mt-1 text-lg font-bold text-gray-900">{{ crowdLabel }}</p>
+            </div>
+          </div>
+          <p class="mt-4 rounded-lg bg-gray-50 p-3 text-sm leading-relaxed text-gray-600">
+            {{ spot.crowdReason || '暫無人潮評估' }}
+          </p>
+        </div>
 
         <h4 class="text-[1.1rem] font-bold text-[#e60023] mb-2.5">📍 地圖位置</h4>
         <iframe :src="spot.map" class="w-full h-[240px] rounded-xl border-0 mt-2.5" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>

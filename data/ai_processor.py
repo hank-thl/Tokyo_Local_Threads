@@ -19,6 +19,7 @@ RAW_INPUT_PATH = RAW_DOCUMENTS_PATH
 FINAL_OUTPUT_PATH = FINAL_DOCUMENTS_PATH
 MODEL_NAME = "gemini-2.5-flash-lite"
 PROCESS_LIMIT = int(os.environ.get("PROCESS_LIMIT", "0")) or None
+CATEGORY_FILTER = os.environ.get("CATEGORY_FILTER")
 
 SDG_OPTIONS = [
     "支持在地經濟",
@@ -47,6 +48,21 @@ REQUIRED_AI_FIELDS = {
     "crowd_level",
     "crowd_reason",
 }
+
+FOOD_CONTEXT_TERMS = [
+    "飲食",
+    "食",
+    "料理",
+    "餐",
+    "咖啡",
+    "商店街",
+    "横丁",
+    "市場",
+    "仲見世",
+    "アメ横",
+    "かっぱ橋",
+    "おかず",
+]
 
 gemini = None
 
@@ -113,6 +129,33 @@ def normalize_crowd_level(value) -> int:
     return max(1, min(5, level))
 
 
+def has_food_context(raw_document: dict) -> bool:
+    if raw_document.get("category") == "restaurant":
+        return True
+
+    searchable_text = " ".join(
+        [
+            raw_document.get("name_jp", ""),
+            raw_document.get("description_jp", ""),
+            " ".join(raw_document.get("food_categories", [])),
+        ]
+    )
+    return any(term in searchable_text for term in FOOD_CONTEXT_TERMS)
+
+
+def normalize_sdg_tags(raw_document: dict, tags: list[str]) -> list[str]:
+    normalized_tags = []
+    for tag in tags:
+        if tag not in SDG_OPTIONS:
+            continue
+        if tag == "在地飲食文化" and not has_food_context(raw_document):
+            continue
+        if tag not in normalized_tags:
+            normalized_tags.append(tag)
+
+    return normalized_tags
+
+
 def call_gemini(raw_document: dict) -> dict:
     client = get_gemini_client()
     category_label = "餐廳/美食店家" if raw_document.get("category") == "restaurant" else "景點"
@@ -138,6 +181,11 @@ def call_gemini(raw_document: dict) -> dict:
 
 sdg_tags 請從以下選項中選擇最相關的 2～4 個：
 {", ".join(SDG_OPTIONS)}
+
+標籤判斷限制：
+- 請只輸出上述選項中的標籤。
+- 「在地飲食文化」僅適用於餐廳、美食店家、商店街、市場、飲食相關設施或介紹文字明確提到飲食文化的資料。
+- 一般寺廟、河川、公園、博物館、橋梁、紀念碑等景點，不要因為位於觀光區就標註「在地飲食文化」。
 
 crowd_level 評分規則：
 1 = 極冷門秘境
@@ -181,7 +229,7 @@ def build_final_record(raw_document: dict, ai_data: dict) -> dict:
             "zh": ai_data.get("description_zh", ""),
             "jp": raw_document.get("description_jp", ""),
         },
-        "sdg_tags": ai_data.get("sdg_tags", []),
+        "sdg_tags": normalize_sdg_tags(raw_document, ai_data.get("sdg_tags", [])),
         "ai_context": ai_data.get("ai_context", ""),
         "crowd_level": normalize_crowd_level(ai_data.get("crowd_level")),
         "crowd_reason": crowd_reason,
@@ -215,6 +263,12 @@ def main() -> None:
         for raw_document in raw_documents
         if raw_document.get("detail_url") not in completed_urls
     ]
+    if CATEGORY_FILTER:
+        pending = [
+            raw_document
+            for raw_document in pending
+            if raw_document.get("category") == CATEGORY_FILTER
+        ]
     if PROCESS_LIMIT is not None:
         pending = pending[:PROCESS_LIMIT]
 

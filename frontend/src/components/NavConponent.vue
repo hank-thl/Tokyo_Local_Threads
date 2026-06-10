@@ -20,6 +20,8 @@ const mapDocumentToSpot = (document, index) => {
     nameJp: document.name?.jp || '',
     description: document.ui_description?.zh || '暫無中文介紹',
     access: '詳細交通請參考官網',
+    crowdLevel: document.crowd_level || 1,
+    crowdReason: document.crowd_reason || '暫無人潮評估',
     image: document.image_url || 'https://via.placeholder.com/1000x600?text=No+Image',
     map: document.google_map_url || '',
     tags: document.sdg_tags || []
