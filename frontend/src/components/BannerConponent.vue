@@ -15,13 +15,13 @@ const bgImage = ref('https://images.unsplash.com/photo-1549693578-d683be217e58')
 
     <div class="absolute inset-0 bg-gradient-to-r from-black/65 to-black/25 z-0"></div>
 
-    <div class="relative z-10 max-w-[520px]">
+    <div class="relative z-10 max-w-[700px]">
       <span class="inline-block px-3.5 py-1.5 mb-4 text-sm tracking-[2px] rounded-full bg-white/15">
         TOKYO LOCAL THREADS
       </span>
 
       <h1 class="my-2.5 text-[3.5rem] tracking-[2px] font-bold">
-        共生東京：永續旅遊新實踐
+        共生東京  永續旅遊新實踐
       </h1>
 
       <p class="mb-[30px] text-[1.2rem] leading-[1.8] text-[#f0f0f0]">
