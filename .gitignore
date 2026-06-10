@@ -5,3 +5,4 @@ __pycache__/
 .uv-cache/
 .env
 .env
+data/demo_backup/
