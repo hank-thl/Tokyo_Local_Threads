@@ -30,25 +30,30 @@ def register_chat_socket(socketio: SocketIO) -> None:
         message = payload.get("message", "").strip()
 
         if not message:
-            socketio.emit(
-                "ai_message",
-                {
-                    "session_id": session_id,
-                    "message": "請輸入想詢問的旅遊需求。",
-                },
-            )
+            payload = {
+                "session_id": session_id,
+                "answer": "請輸入想詢問的旅遊需求。",
+                "message": "請輸入想詢問的旅遊需求。",
+            }
+            socketio.emit("ai_response", payload)
             return
 
-        answer = rag_service.generate_travel_advice(
-            session_id=session_id,
-            user_query=message,
-        )
+        print(f"[SocketIO] user_message session_id={session_id} message={message}")
 
-        # 回傳 AI 回覆給前端；目前是一次性回覆，後續可改為 streaming。
-        socketio.emit(
-            "ai_message",
-            {
-                "session_id": session_id,
-                "message": answer,
-            },
-        )
+        try:
+            answer = rag_service.generate_travel_advice(
+                session_id=session_id,
+                user_query=message,
+            )
+            print(f"[SocketIO] ai_response session_id={session_id}")
+        except Exception as error:
+            print(f"[SocketIO] RAG error session_id={session_id}: {error}")
+            answer = "AI 永續旅伴目前處理失敗，請稍後再試，或確認後端 API Key 與 MongoDB 連線設定。"
+
+        # 回傳 AI 回覆給前端；ai_response 是正式事件。
+        payload = {
+            "session_id": session_id,
+            "answer": answer,
+            "message": answer,
+        }
+        socketio.emit("ai_response", payload)

@@ -16,6 +16,7 @@ const isConnected = ref(false)
 const chatBodyRef = ref(null)
 const socket = ref(null)
 const sessionId = ref('')
+const lastAiText = ref('')
 const messages = ref([
   {
     sender: 'ai',
@@ -41,13 +42,36 @@ const scrollToBottom = async () => {
   chatBodyRef.value.scrollTop = chatBodyRef.value.scrollHeight
 }
 
+const escapeHtml = (text) => {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+const formatMessage = (text) => {
+  return escapeHtml(text)
+    .replace(/^### (.+)$/gm, '<div class="chat-heading">$1</div>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^\* (.+)$/gm, '<div class="chat-list-item">• $1</div>')
+    .replace(/^- (.+)$/gm, '<div class="chat-list-item">• $1</div>')
+    .replace(/\n/g, '<br>')
+}
+
 const pushAiMessage = (text) => {
   if (!text) return
+  if (text === lastAiText.value) {
+    isLoading.value = false
+    return
+  }
 
   messages.value.push({
     sender: 'ai',
     text,
   })
+  lastAiText.value = text
   isLoading.value = false
 }
 
@@ -165,7 +189,8 @@ onUnmounted(() => {
                     : 'rounded-tl-sm border border-gray-100 bg-white text-gray-800',
                 ]"
               >
-                {{ msg.text }}
+                <span v-if="msg.sender === 'user'">{{ msg.text }}</span>
+                <span v-else class="chat-message-content" v-html="formatMessage(msg.text)"></span>
               </div>
             </div>
 
@@ -237,4 +262,24 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+:deep(.chat-message-content strong) {
+  font-weight: 700;
+  color: #111827;
+}
+
+:deep(.chat-heading) {
+  margin-top: 0.75rem;
+  margin-bottom: 0.35rem;
+  font-weight: 700;
+  color: #166534;
+}
+
+:deep(.chat-heading:first-child) {
+  margin-top: 0;
+}
+
+:deep(.chat-list-item) {
+  margin-top: 0.25rem;
+  padding-left: 0.15rem;
+}
 </style>

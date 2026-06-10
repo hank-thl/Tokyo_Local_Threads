@@ -33,6 +33,12 @@ class RagService:
         return self.spot_repository.find_sdg_tags()
 
     def generate_travel_advice(self, session_id: str, user_query: str) -> str:
+        # 先建立對話歷史並取得既有訊息。
+        # 使用者訊息會在 LLM 呼叫前先寫入，避免 AI 失敗時完全沒有監控紀錄。
+        history = self._get_chat_history(session_id)
+        previous_messages = history.messages
+        history.add_user_message(user_query)
+
         # 1. 依照使用者問題，先從 MongoDB 找出相關旅遊文件。
         relevant_spots = self.spot_repository.get_relevant_spots(user_query)
 
@@ -43,14 +49,10 @@ class RagService:
         # 3. 將 MongoDB 文件整理成 RAG Context，讓 LLM 只能依據這些資料回答。
         context = self._build_rag_context(relevant_spots, diversion_spots)
 
-        # 4. 讀取同一 session 的歷史紀錄，支援多輪對話延續。
-        history = self._get_chat_history(session_id)
-        previous_messages = history.messages
-
-        # 5. 建立具備專題核心規則的 System Prompt。
+        # 4. 建立具備專題核心規則的 System Prompt。
         system_prompt = self._build_system_prompt(context)
 
-        # 6. 呼叫 Gemini。此處使用既有 GOOGLE_API_KEY / GEMINI_API_KEY。
+        # 5. 呼叫 Gemini。此處使用既有 GOOGLE_API_KEY / GEMINI_API_KEY。
         llm = self._get_llm()
         response = llm.invoke(
             [
@@ -61,8 +63,7 @@ class RagService:
         )
         answer = response.content.strip()
 
-        # 7. 將本輪使用者問題與 AI 回覆存入 MongoDB chat_histories。
-        history.add_user_message(user_query)
+        # 6. 將 AI 回覆存入 MongoDB chat_histories。
         history.add_ai_message(answer)
 
         return answer
@@ -155,6 +156,13 @@ class RagService:
 5. 啟動「觀光人潮避雷針」時，必須清楚提醒該地點較擁擠，並根據相同或相近 sdg_tags，從「人潮避雷針分流候選」中推薦較不擁擠的替代景點。
 6. 如果 RAG 大抄脈絡沒有足夠資料回答，請明確說明目前資料不足，並改用已提供的資料做保守建議。
 7. 不要輸出資料庫內沒有的價格、精確營業時間、即時排隊狀況或交通細節。
+8. 回覆格式必須清楚分段，請使用以下結構：
+   - 先用 1 句話直接回答使用者需求。
+   - 接著列出 2 到 3 個推薦項目，每個項目都用「### 名稱」作為小標題。
+   - 每個推薦項目下方用短行列出「推薦理由」、「永續標籤」、「擁擠度」。
+   - 若需要分流，新增「### 觀光人潮避雷針」段落。
+   - 最後用 1 句話詢問使用者下一步偏好。
+9. 不要把所有內容寫成同一段；每個段落之間必須保留換行。
 
 RAG 大抄脈絡：
 {context}
