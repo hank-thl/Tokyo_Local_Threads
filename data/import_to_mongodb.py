@@ -64,7 +64,15 @@ def build_upsert_operations(documents: list[dict]) -> list[UpdateOne]:
 
 
 def main() -> None:
+    print("=" * 60)
+    print("共生東京資料管線 Step 3：匯入 MongoDB Atlas")
+    print("=" * 60)
+
     uri, db_name, collection_name = get_mongo_config()
+    print(f"輸入檔案：{FINAL_DOCUMENTS_PATH}")
+    print(f"目標資料庫：{db_name}")
+    print(f"目標 Collection：{collection_name}")
+
     documents = load_documents()
     operations = build_upsert_operations(documents)
 
@@ -84,6 +92,7 @@ def main() -> None:
 
         result = collection.bulk_write(operations, ordered=False)
         print("MongoDB Atlas 匯入完成")
+        print("資料進入 MongoDB 後會由 MongoDB 自動以 BSON 格式穩定儲存")
         print(f"資料庫：{db_name}")
         print(f"Collection：{collection_name}")
         print(f"讀取文件：{len(documents)}")

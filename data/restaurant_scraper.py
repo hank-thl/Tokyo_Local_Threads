@@ -247,6 +247,14 @@ def merge_food_category(record: dict, food_category: str) -> bool:
 
 
 def main() -> None:
+    print("=" * 60, flush=True)
+    print("共生東京資料管線 Step 1B：餐廳爬蟲", flush=True)
+    print("=" * 60, flush=True)
+    print(f"起始分類 URL：{CATEGORY_URL}", flush=True)
+    print(f"每分類最大頁數：{MAX_PAGES_PER_CATEGORY}", flush=True)
+    print(f"每分類最大餐廳數：{MAX_RESTAURANTS_PER_CATEGORY}", flush=True)
+    print(f"輸出檔案：{RAW_OUTPUT_PATH}", flush=True)
+
     session = requests.Session()
     raw_records = load_json(RAW_OUTPUT_PATH)
     records_by_url = {record["detail_url"]: record for record in raw_records}

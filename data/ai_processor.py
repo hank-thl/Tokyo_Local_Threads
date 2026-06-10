@@ -246,6 +246,15 @@ def upsert_record(records: list[dict], new_record: dict) -> None:
 
 
 def main() -> None:
+    print("=" * 60)
+    print("共生東京資料管線 Step 2：AI 清洗與 SDG / 人潮標註")
+    print("=" * 60)
+    print(f"模型：{MODEL_NAME}")
+    print(f"輸入檔案：{RAW_INPUT_PATH}")
+    print(f"輸出檔案：{FINAL_OUTPUT_PATH}")
+    print(f"類別過濾：{CATEGORY_FILTER or '全部'}")
+    print(f"處理上限：{PROCESS_LIMIT or '不限'}")
+
     raw_documents = load_json(RAW_INPUT_PATH)
     if not raw_documents:
         raise FileNotFoundError(

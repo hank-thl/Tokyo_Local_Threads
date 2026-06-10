@@ -184,6 +184,14 @@ def save_json(path: str, records: list[dict]) -> None:
 
 
 def main() -> None:
+    print("=" * 60)
+    print("共生東京資料管線 Step 1A：景點爬蟲")
+    print("=" * 60)
+    print(f"起始列表 URL：{LIST_URL}")
+    print(f"最大頁數：{MAX_PAGES}")
+    print(f"最大景點數：{MAX_SPOTS}")
+    print(f"輸出檔案：{RAW_OUTPUT_PATH}")
+
     raw_records = load_json(RAW_OUTPUT_PATH)
     done_urls = {record["detail_url"] for record in raw_records}
     print(f"載入既有 raw 資料：{len(raw_records)} 筆")
