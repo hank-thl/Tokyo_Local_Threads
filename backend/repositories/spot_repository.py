@@ -42,10 +42,13 @@ class SpotRepository:
         if prefers_low_crowd:
             base_query["crowd_level"] = {"$lte": 3}
 
+        skip_count = 3 if self._wants_more_options(user_query) else 0
+
         if not keywords:
             cursor = (
                 database.documents_collection.find(base_query)
                 .sort([("crowd_level", 1), ("name.zh", 1)])
+                .skip(skip_count)
                 .limit(limit)
             )
             documents = [self._serialize_document(document) for document in cursor]
@@ -54,6 +57,7 @@ class SpotRepository:
                 fallback_cursor = (
                     database.documents_collection.find({"category": category_filter})
                     .sort([("crowd_level", 1), ("name.zh", 1)])
+                    .skip(skip_count)
                     .limit(limit)
                 )
                 documents = [
@@ -74,7 +78,6 @@ class SpotRepository:
                     {"ai_context": regex},
                     {"sdg_tags": regex},
                     {"food_categories": regex},
-                    {"category": regex},
                 ]
             )
 
@@ -82,6 +85,7 @@ class SpotRepository:
         cursor = (
             database.documents_collection.find(query)
             .sort([("crowd_level", 1), ("name.zh", 1)])
+            .skip(skip_count)
             .limit(limit)
         )
         documents = [self._serialize_document(document) for document in cursor]
@@ -91,6 +95,7 @@ class SpotRepository:
             fallback_cursor = (
                 database.documents_collection.find(base_query)
                 .sort([("crowd_level", 1), ("name.zh", 1)])
+                .skip(skip_count)
                 .limit(limit)
             )
             documents = [
@@ -102,6 +107,7 @@ class SpotRepository:
             fallback_cursor = (
                 database.documents_collection.find({"category": category_filter})
                 .sort([("crowd_level", 1), ("name.zh", 1)])
+                .skip(skip_count)
                 .limit(limit)
             )
             documents = [
@@ -143,6 +149,8 @@ class SpotRepository:
         tokens = re.findall(r"[\w\u3040-\u30ff\u3400-\u9fff]+", user_query or "")
         stop_words = {
             "我",
+            "你",
+            "這",
             "想",
             "要",
             "去",
@@ -161,6 +169,23 @@ class SpotRepository:
             "人少",
             "一點",
             "肚子餓",
+            "台東區",
+            "東京",
+            "旅遊",
+            "餐廳",
+            "美食",
+            "景點",
+            "店家",
+            "地點",
+            "選擇",
+            "比較",
+            "只有",
+            "三家",
+            "其他",
+            "更多",
+            "別的",
+            "低擁擠",
+            "避開人潮",
         }
 
         keywords = []
@@ -214,6 +239,21 @@ class SpotRepository:
         }
         normalized_query = (user_query or "").lower()
         return any(keyword in normalized_query for keyword in low_crowd_keywords)
+
+    def _wants_more_options(self, user_query: str) -> bool:
+        more_keywords = {
+            "只有這三家",
+            "只有三家",
+            "還有嗎",
+            "還有別的",
+            "其他",
+            "更多",
+            "別的",
+            "換一批",
+            "不是這幾家",
+        }
+        normalized_query = (user_query or "").lower()
+        return any(keyword in normalized_query for keyword in more_keywords)
 
     def _serialize_document(self, document: dict) -> dict:
         document["_id"] = str(document["_id"])

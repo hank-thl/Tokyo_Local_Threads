@@ -41,10 +41,17 @@ class RagService:
         previous_messages = history.messages
         history.add_user_message(user_query)
 
-        # 1. 依照使用者問題與近期對話，先從 MongoDB 找出相關旅遊文件。
-        # 例如第二輪只說「想要人少一點」時，仍能承接上一輪「我肚子餓」的餐廳需求。
-        retrieval_query = self._build_retrieval_query(user_query, previous_messages)
+        # 1. 先用 LLM Query Rewriter 將多輪對話整理成適合檢索的明確查詢。
+        # 例如「我肚子餓」後接「想要人少一點」會被改寫成
+        # 「台東區 人少 避開人潮 餐廳 美食」這類可被 MongoDB regex 命中的查詢。
+        llm = self._get_llm()
+        retrieval_query = self._rewrite_retrieval_query(
+            llm=llm,
+            user_query=user_query,
+            previous_messages=previous_messages,
+        )
         relevant_spots = self.spot_repository.get_relevant_spots(retrieval_query)
+        relevant_spots = self._dedupe_restaurant_brands(relevant_spots)
 
         # 2. 若相關文件中有 crowd_level 4 或 5 的熱門點，
         #    額外找出相同 SDG 標籤、但 crowd_level 較低的分流候選。
@@ -59,7 +66,6 @@ class RagService:
         system_prompt = self._build_system_prompt(context)
 
         # 5. 呼叫 Gemini。此處使用既有 GOOGLE_API_KEY / GEMINI_API_KEY。
-        llm = self._get_llm()
         response = llm.invoke(
             [
                 SystemMessage(content=system_prompt),
@@ -103,10 +109,62 @@ class RagService:
     def _build_retrieval_query(self, user_query: str, previous_messages: list) -> str:
         recent_human_messages = []
         for message in previous_messages[-6:]:
-            if message.type == "human" and message.content:
+            if getattr(message, "type", "") == "human" and message.content:
                 recent_human_messages.append(message.content)
 
         return " ".join([*recent_human_messages, user_query]).strip()
+
+    def _rewrite_retrieval_query(
+        self,
+        llm: ChatGoogleGenerativeAI,
+        user_query: str,
+        previous_messages: list,
+    ) -> str:
+        fallback_query = self._build_retrieval_query(user_query, previous_messages)
+        dialogue = self._format_recent_dialogue(previous_messages, user_query)
+
+        rewrite_prompt = f"""
+你是 RAG 系統的「查詢改寫器」，不是聊天助理。
+請根據最近對話，把使用者真正想找的東京台東區旅遊需求，改寫成一行適合 MongoDB 關鍵字檢索的繁體中文查詢。
+
+改寫規則：
+1. 只能輸出查詢文字，不要回答使用者，不要加標點說明。
+2. 必須保留使用者提到的地名、店名、景點名、料理類型、SDG 偏好與擁擠度偏好。
+3. 若使用者想吃、肚子餓、找美食，查詢中要包含「餐廳 美食」。
+4. 若使用者想逛、拍照、文化體驗，查詢中要包含「景點 文化體驗」。
+5. 若使用者想人少、安靜、避開排隊，查詢中要包含「人少 避開人潮 低擁擠」。
+6. 若當前句子很短，必須承接前文補足需求。
+7. 長度控制在 60 個中文字以內。
+
+最近使用者訊息：
+{dialogue}
+""".strip()
+
+        try:
+            response = llm.invoke([HumanMessage(content=rewrite_prompt)])
+            rewritten_query = response.content.strip().splitlines()[0].strip()
+        except Exception as error:
+            print(f"[RAG] Query rewrite failed, fallback to raw query: {error}")
+            return fallback_query
+
+        if not rewritten_query:
+            return fallback_query
+
+        print(f"[RAG] rewritten query: {rewritten_query}")
+        return rewritten_query
+
+    def _format_recent_dialogue(self, previous_messages: list, user_query: str) -> str:
+        dialogue_lines = []
+        for message in previous_messages[-6:]:
+            if getattr(message, "type", "") != "human":
+                continue
+
+            content = (message.content or "").strip()
+            if content:
+                dialogue_lines.append(f"使用者：{content}")
+
+        dialogue_lines.append(f"使用者：{user_query}")
+        return "\n".join(dialogue_lines)
 
     def _find_diversion_spots(self, relevant_spots: list[dict]) -> list[dict]:
         high_crowd_spots = [
@@ -148,6 +206,27 @@ class RagService:
 
         return "\n".join(context_blocks)
 
+    def _dedupe_restaurant_brands(self, spots: list[dict]) -> list[dict]:
+        deduped_spots = []
+        seen_brands = set()
+
+        for spot in spots:
+            if spot.get("category") != "restaurant":
+                deduped_spots.append(spot)
+                continue
+
+            name = spot.get("name", {})
+            display_name = name.get("zh") or name.get("jp") or ""
+            brand_key = self._normalize_restaurant_brand(display_name)
+            if brand_key and brand_key in seen_brands:
+                continue
+
+            if brand_key:
+                seen_brands.add(brand_key)
+            deduped_spots.append(spot)
+
+        return deduped_spots
+
     def _format_spot_context(self, index: int, spot: dict) -> str:
         name = spot.get("name", {})
         description = spot.get("ui_description", {})
@@ -187,6 +266,7 @@ class RagService:
     def _build_recommendations(self, spots: list[dict], limit: int = 3) -> list[dict]:
         recommendations = []
         seen_ids = set()
+        seen_brands = set()
 
         for spot in spots:
             if spot.get("category") != "restaurant":
@@ -196,13 +276,19 @@ class RagService:
             if not spot_id or spot_id in seen_ids:
                 continue
 
-            seen_ids.add(spot_id)
             name = spot.get("name", {})
+            display_name = name.get("zh") or name.get("jp") or "未命名店家"
+            brand_key = self._normalize_restaurant_brand(display_name)
+            if brand_key in seen_brands:
+                continue
+
+            seen_ids.add(spot_id)
+            seen_brands.add(brand_key)
             description = spot.get("ui_description", {})
             recommendations.append(
                 {
                     "id": spot_id,
-                    "name": name.get("zh") or name.get("jp") or "未命名店家",
+                    "name": display_name,
                     "name_jp": name.get("jp", ""),
                     "reason": self._build_recommendation_reason(description),
                     "sdg_tags": spot.get("sdg_tags", []),
@@ -215,6 +301,27 @@ class RagService:
                 break
 
         return recommendations
+
+    def _normalize_restaurant_brand(self, name: str) -> str:
+        brand = name.strip()
+        branch_suffixes = [
+            "御徒町店",
+            "湯島店",
+            "上野店",
+            "浅草店",
+            "淺草店",
+            "雷門店",
+            "本店",
+            "駅前店",
+            "車站前店",
+            "總店",
+        ]
+
+        for suffix in branch_suffixes:
+            if brand.endswith(suffix):
+                brand = brand[: -len(suffix)].strip()
+
+        return brand.replace(" ", "").replace("　", "").lower()
 
     def _build_recommendation_reason(self, description: dict) -> str:
         reason = description.get("zh", "").strip()
