@@ -49,6 +49,21 @@ const scrollToBottom = async () => {
   chatBodyRef.value.scrollTop = chatBodyRef.value.scrollHeight
 }
 
+const scrollToLastUserMessage = async () => {
+  await nextTick()
+  if (!chatBodyRef.value) return
+
+  const userMessages = chatBodyRef.value.querySelectorAll('[data-chat-sender="user"]')
+  const lastUserMessage = userMessages[userMessages.length - 1]
+  if (!lastUserMessage) return
+
+  const containerRect = chatBodyRef.value.getBoundingClientRect()
+  const messageRect = lastUserMessage.getBoundingClientRect()
+  const targetTop = messageRect.top - containerRect.top + chatBodyRef.value.scrollTop - 12
+
+  chatBodyRef.value.scrollTop = Math.max(targetTop, 0)
+}
+
 const escapeHtml = (text) => {
   return text
     .replace(/&/g, '&amp;')
@@ -310,6 +325,7 @@ const pushAiMessage = async (text, sources = [], recommendations = []) => {
   })
   lastAiText.value = text
   isLoading.value = false
+  await scrollToLastUserMessage()
 }
 
 const connectSocket = () => {
@@ -393,11 +409,10 @@ const stopLoadingDots = () => {
   loadingDots.value = '.'
 }
 
-watch(messages, scrollToBottom, { deep: true })
-watch(isLoading, scrollToBottom)
 watch(isLoading, (loading) => {
   if (loading) {
     startLoadingDots()
+    scrollToBottom()
   } else {
     stopLoadingDots()
   }
@@ -451,6 +466,7 @@ onUnmounted(() => {
             <div
               v-for="(msg, index) in messages"
               :key="index"
+              :data-chat-sender="msg.sender"
               :class="['flex', msg.sender === 'user' ? 'justify-end' : 'justify-start']"
             >
               <div
