@@ -21,6 +21,9 @@ const socket = ref(null)
 const sessionId = ref('')
 const lastAiText = ref('')
 const spotLinks = ref([])
+const loadingDots = ref('.')
+let loadingTimer = null
+let spotLinksPromise = null
 const messages = ref([
   {
     sender: 'ai',
@@ -55,43 +58,150 @@ const escapeHtml = (text) => {
     .replace(/'/g, '&#039;')
 }
 
+const normalizeLinkChar = (char) => {
+  const charMap = {
+    寿: '壽',
+    浅: '淺',
+    総: '總',
+    舗: '舖',
+  }
+
+  return charMap[char] || char
+}
+
+const normalizeLinkName = (name) => {
+  return [...escapeHtml(name).replace(/[\s　]+/g, '')].map(normalizeLinkChar).join('')
+}
+
+const buildNameVariants = (name) => {
+  const trimmedName = name.trim()
+  const compactName = trimmedName.replace(/[\s　]+/g, '')
+  const variants = new Set([trimmedName, compactName])
+
+  // Gemini 有時會把「淺草雷門店」拆成「淺草 雷門店」，這裡補常見地名斷詞。
+  compactName
+    .replace(/(淺草)(雷門)/g, '$1 $2')
+    .replace(/(上野)(御徒町)/g, '$1 $2')
+    .split('\n')
+    .forEach((variant) => variants.add(variant))
+
+  return [...variants].filter((variant) => normalizeLinkName(variant).length >= 2)
+}
+
 const buildSpotLinks = async () => {
   try {
     const documents = await fetchDocuments({ limit: 100 })
-    const links = []
-
-    documents.forEach((document) => {
-      const id = document._id
-      const names = [document.name?.zh, document.name?.jp].filter(Boolean)
-
-      names.forEach((name) => {
-        if (name.length < 2) return
-        links.push({
-          name,
-          escapedName: escapeHtml(name),
-          id,
-        })
-      })
-    })
-
-    spotLinks.value = links.sort((a, b) => b.escapedName.length - a.escapedName.length)
+    mergeSpotLinkDocuments(documents)
   } catch (error) {
     console.error('無法建立聊天景點連結索引', error)
   }
 }
 
-const linkSpotNames = (escapedText) => {
+const ensureSpotLinksReady = () => {
+  if (!spotLinksPromise) {
+    spotLinksPromise = buildSpotLinks()
+  }
+
+  return spotLinksPromise
+}
+
+const mergeSpotLinkDocuments = (documents) => {
+  const links = [...spotLinks.value, ...buildLinksFromDocuments(documents)]
+
+  const dedupedLinks = []
+  links.forEach((link) => {
+    const isDuplicated = dedupedLinks.some(
+      existingLink => existingLink.id === link.id && existingLink.normalizedName === link.normalizedName
+    )
+    if (!isDuplicated) {
+      dedupedLinks.push(link)
+    }
+  })
+
+  spotLinks.value = dedupedLinks.sort((a, b) => b.normalizedName.length - a.normalizedName.length)
+}
+
+const isLinkNameWhitespace = (char) => {
+  return /[\s　]/.test(char)
+}
+
+const matchSpotAt = (escapedText, startIndex, spot) => {
+  if (isLinkNameWhitespace(escapedText[startIndex])) {
+    return null
+  }
+
+  let textIndex = startIndex
+  let nameIndex = 0
+
+  while (textIndex < escapedText.length && nameIndex < spot.normalizedName.length) {
+    const currentChar = escapedText[textIndex]
+
+    if (isLinkNameWhitespace(currentChar)) {
+      textIndex += 1
+      continue
+    }
+
+    if (normalizeLinkChar(currentChar) !== spot.normalizedName[nameIndex]) {
+      return null
+    }
+
+    textIndex += 1
+    nameIndex += 1
+  }
+
+  if (nameIndex !== spot.normalizedName.length) {
+    return null
+  }
+
+  return {
+    spot,
+    endIndex: textIndex,
+  }
+}
+
+const buildLinksFromDocuments = (documents) => {
+  const links = []
+
+  documents.forEach((document) => {
+    if (document.category !== 'restaurant') return
+
+    const id = document._id || document.id
+    const names = [document.name?.zh, document.name?.jp, document.name].filter(
+      name => typeof name === 'string' && name
+    )
+    if (!id || names.length === 0) return
+
+    names.forEach((name) => {
+      buildNameVariants(name).forEach((variant) => {
+        links.push({
+          name,
+          normalizedName: normalizeLinkName(variant),
+          id,
+        })
+      })
+    })
+  })
+
+  return links
+}
+
+const linkSpotNames = (escapedText, sources = []) => {
+  const sourceLinks = buildLinksFromDocuments(sources)
+  const links = [...sourceLinks, ...spotLinks.value].sort(
+    (a, b) => b.normalizedName.length - a.normalizedName.length
+  )
   let output = ''
   let index = 0
 
   while (index < escapedText.length) {
-    const matchedSpot = spotLinks.value.find((spot) =>
-      escapedText.startsWith(spot.escapedName, index)
-    )
+    const match = links
+      .map((spot) => matchSpotAt(escapedText, index, spot))
+      .find(Boolean)
 
-    if (matchedSpot) {
-      output += `<a href="/spot/${matchedSpot.id}" data-spot-id="${matchedSpot.id}" class="chat-spot-link">${matchedSpot.escapedName}</a>`
-      index += matchedSpot.escapedName.length
+    if (match) {
+      const matchedText = escapedText.slice(index, match.endIndex)
+      output += `<a href="/spot/${match.spot.id}" data-spot-id="${match.spot.id}" class="chat-spot-link">${matchedText}</a>`
+      index = match.endIndex
     } else {
       output += escapedText[index]
       index += 1
@@ -101,13 +211,22 @@ const linkSpotNames = (escapedText) => {
   return output
 }
 
-const formatMessage = (text) => {
-  return linkSpotNames(escapeHtml(text))
+const formatMessage = (text, sources = []) => {
+  return linkSpotNames(escapeHtml(text), sources)
     .replace(/^### (.+)$/gm, '<div class="chat-heading">$1</div>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/^\* (.+)$/gm, '<div class="chat-list-item">• $1</div>')
     .replace(/^- (.+)$/gm, '<div class="chat-list-item">• $1</div>')
     .replace(/\n/g, '<br>')
+}
+
+const extractIntroText = (text) => {
+  return text.split(/\n\s*\n/)[0] || text
+}
+
+const extractClosingText = (text) => {
+  const blocks = text.split(/\n\s*\n/).filter(Boolean)
+  return blocks.length > 1 ? blocks[blocks.length - 1] : ''
 }
 
 const handleMessageClick = (event) => {
@@ -123,16 +242,72 @@ const handleMessageClick = (event) => {
   })
 }
 
-const pushAiMessage = (text) => {
+const openRecommendation = (recommendation) => {
+  router.push({
+    name: 'spot-detail',
+    params: {
+      spotId: recommendation.id,
+    },
+  })
+}
+
+const normalizeSources = (sources = []) => {
+  const normalizedSources = []
+
+  sources.forEach((source) => {
+    if (source.category !== 'restaurant') return
+
+    const id = source._id || source.id
+    const nameZh = source.name?.zh || ''
+    const nameJp = source.name?.jp || ''
+    const displayName = nameZh || nameJp
+    if (!id || !displayName) return
+
+    const isDuplicated = normalizedSources.some((item) => item.id === id)
+    if (isDuplicated) return
+
+    normalizedSources.push({
+      id,
+      name: displayName,
+      category: source.category || '',
+    })
+  })
+
+  return normalizedSources
+}
+
+const normalizeRecommendations = (recommendations = []) => {
+  return recommendations
+    .filter((item) => item.id && item.name)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      nameJp: item.name_jp || '',
+      reason: item.reason || '可作為台東區在地美食體驗選擇。',
+      sdgTags: item.sdg_tags || [],
+      crowdLevel: item.crowd_level || 3,
+      crowdReason: item.crowd_reason || '',
+    }))
+}
+
+const pushAiMessage = async (text, sources = [], recommendations = []) => {
   if (!text) return
   if (text === lastAiText.value) {
     isLoading.value = false
     return
   }
 
+  await ensureSpotLinksReady()
+
+  if (sources.length > 0) {
+    mergeSpotLinkDocuments(sources)
+  }
+
   messages.value.push({
     sender: 'ai',
     text,
+    sources: normalizeSources(sources),
+    recommendations: normalizeRecommendations(recommendations),
   })
   lastAiText.value = text
   isLoading.value = false
@@ -157,17 +332,25 @@ const connectSocket = () => {
   })
 
   // 依照本階段規格監聽 ai_response，讀取 answer 欄位。
-  socket.value.on('ai_response', (data) => {
-    pushAiMessage(data?.answer || data?.message || 'AI 回覆格式有誤，請稍後再試。')
+  socket.value.on('ai_response', async (data) => {
+    await pushAiMessage(
+      data?.answer || data?.message || 'AI 回覆格式有誤，請稍後再試。',
+      data?.sources || [],
+      data?.recommendations || []
+    )
   })
 
   // 相容目前後端 sockets/chat.py 使用的 ai_message 事件。
-  socket.value.on('ai_message', (data) => {
-    pushAiMessage(data?.answer || data?.message || 'AI 回覆格式有誤，請稍後再試。')
+  socket.value.on('ai_message', async (data) => {
+    await pushAiMessage(
+      data?.answer || data?.message || 'AI 回覆格式有誤，請稍後再試。',
+      data?.sources || [],
+      data?.recommendations || []
+    )
   })
 }
 
-const sendMessage = () => {
+const sendMessage = async () => {
   const message = inputText.value.trim()
   if (!message || isLoading.value) return
 
@@ -178,6 +361,8 @@ const sendMessage = () => {
     })
     return
   }
+
+  await ensureSpotLinksReady()
 
   messages.value.push({
     sender: 'user',
@@ -193,16 +378,40 @@ const sendMessage = () => {
   isLoading.value = true
 }
 
+const startLoadingDots = () => {
+  if (loadingTimer) return
+
+  loadingTimer = window.setInterval(() => {
+    loadingDots.value = loadingDots.value.length >= 3 ? '.' : `${loadingDots.value}.`
+  }, 500)
+}
+
+const stopLoadingDots = () => {
+  if (!loadingTimer) return
+
+  window.clearInterval(loadingTimer)
+  loadingTimer = null
+  loadingDots.value = '.'
+}
+
 watch(messages, scrollToBottom, { deep: true })
 watch(isLoading, scrollToBottom)
+watch(isLoading, (loading) => {
+  if (loading) {
+    startLoadingDots()
+  } else {
+    stopLoadingDots()
+  }
+})
 
 onMounted(() => {
   sessionId.value = getOrCreateSessionId()
   connectSocket()
-  buildSpotLinks()
+  ensureSpotLinksReady()
 })
 
 onUnmounted(() => {
+  stopLoadingDots()
   socket.value?.disconnect()
 })
 </script>
@@ -254,7 +463,55 @@ onUnmounted(() => {
                 ]"
               >
                 <span v-if="msg.sender === 'user'">{{ msg.text }}</span>
-                <span v-else class="chat-message-content" v-html="formatMessage(msg.text)"></span>
+                <template v-else>
+                  <div v-if="msg.recommendations?.length" class="chat-message-content">
+                    <p v-html="formatMessage(extractIntroText(msg.text), msg.sources || [])"></p>
+
+                    <div class="mt-4 space-y-4">
+                      <article
+                        v-for="recommendation in msg.recommendations"
+                        :key="recommendation.id"
+                        class="border-t border-gray-100 pt-3 first:border-t-0 first:pt-0"
+                      >
+                        <button
+                          type="button"
+                          class="text-left text-base font-bold text-green-700 underline decoration-green-200 underline-offset-4 transition-colors hover:text-green-800"
+                          @click.stop="openRecommendation(recommendation)"
+                        >
+                          {{ recommendation.name }}
+                        </button>
+                        <p
+                          v-if="recommendation.nameJp && recommendation.nameJp !== recommendation.name"
+                          class="mt-0.5 text-xs italic tracking-wide text-gray-400"
+                        >
+                          {{ recommendation.nameJp }}
+                        </p>
+
+                        <p class="mt-2">
+                          <span class="font-semibold text-gray-800">推薦理由：</span>{{ recommendation.reason }}
+                        </p>
+                        <p class="mt-1">
+                          <span class="font-semibold text-gray-800">永續標籤：</span>
+                          <span v-if="recommendation.sdgTags.length">
+                            {{ recommendation.sdgTags.map(tag => `#${tag}`).join(' ') }}
+                          </span>
+                          <span v-else>暫無標籤</span>
+                        </p>
+                        <p class="mt-1">
+                          <span class="font-semibold text-gray-800">擁擠度：</span>
+                          {{ recommendation.crowdLevel }}/5<span v-if="recommendation.crowdReason">，{{ recommendation.crowdReason }}</span>
+                        </p>
+                      </article>
+                    </div>
+
+                    <p
+                      v-if="extractClosingText(msg.text)"
+                      class="mt-4"
+                      v-html="formatMessage(extractClosingText(msg.text), msg.sources || [])"
+                    ></p>
+                  </div>
+                  <span v-else class="chat-message-content" v-html="formatMessage(msg.text, msg.sources || [])"></span>
+                </template>
               </div>
             </div>
 
@@ -262,7 +519,12 @@ onUnmounted(() => {
               <div
                 class="max-w-[88%] rounded-2xl rounded-tl-sm border border-gray-100 bg-white px-4 py-2.5 text-sm leading-relaxed text-gray-600 shadow-sm"
               >
-                ⚡ AI 永續旅伴正在查閱台東區避雷針大數據...
+                <img
+                  src="/icons/cat_walk.webp"
+                  alt=""
+                  class="mr-1.5 inline h-5 w-5 align-[-0.2em] object-contain"
+                />
+                <span>正在穿梭淺草與上野的巷弄...為您編織舒適的在地脈絡{{ loadingDots }}</span>
               </div>
             </div>
           </div>

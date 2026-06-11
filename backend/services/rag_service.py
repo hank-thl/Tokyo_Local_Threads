@@ -23,6 +23,8 @@ class RagService:
     def __init__(self, spot_repository: SpotRepository | None = None):
         self.spot_repository = spot_repository or SpotRepository()
         self.config = load_config()
+        self.last_sources: list[dict] = []
+        self.last_recommendations: list[dict] = []
 
     def list_documents(
         self, category: str | None = None, limit: int = 20
@@ -45,6 +47,8 @@ class RagService:
         # 2. 若相關文件中有 crowd_level 4 或 5 的熱門點，
         #    額外找出相同 SDG 標籤、但 crowd_level 較低的分流候選。
         diversion_spots = self._find_diversion_spots(relevant_spots)
+        self.last_sources = self._build_sources(relevant_spots + diversion_spots)
+        self.last_recommendations = self._build_recommendations(relevant_spots)
 
         # 3. 將 MongoDB 文件整理成 RAG Context，讓 LLM 只能依據這些資料回答。
         context = self._build_rag_context(relevant_spots, diversion_spots)
@@ -67,6 +71,12 @@ class RagService:
         history.add_ai_message(answer)
 
         return answer
+
+    def get_last_sources(self) -> list[dict]:
+        return self.last_sources
+
+    def get_last_recommendations(self) -> list[dict]:
+        return self.last_recommendations
 
     def _get_chat_history(self, session_id: str) -> MongoDBChatMessageHistory:
         # 使用 session_id 將每位使用者的多輪對話存在獨立歷史紀錄中。
@@ -143,6 +153,58 @@ class RagService:
             f"   擁擠度：{crowd_level}/5\n"
             f"   擁擠原因：{crowd_reason}\n"
         )
+
+    def _build_sources(self, spots: list[dict]) -> list[dict]:
+        sources = []
+        seen_ids = set()
+
+        for spot in spots:
+            spot_id = spot.get("_id")
+            if not spot_id or spot_id in seen_ids:
+                continue
+
+            seen_ids.add(spot_id)
+            sources.append(
+                {
+                    "id": spot_id,
+                    "name": spot.get("name", {}),
+                    "category": spot.get("category", ""),
+                }
+            )
+
+        return sources
+
+    def _build_recommendations(self, spots: list[dict], limit: int = 3) -> list[dict]:
+        recommendations = []
+        seen_ids = set()
+
+        for spot in spots:
+            if spot.get("category") != "restaurant":
+                continue
+
+            spot_id = spot.get("_id")
+            if not spot_id or spot_id in seen_ids:
+                continue
+
+            seen_ids.add(spot_id)
+            name = spot.get("name", {})
+            description = spot.get("ui_description", {})
+            recommendations.append(
+                {
+                    "id": spot_id,
+                    "name": name.get("zh") or name.get("jp") or "未命名店家",
+                    "name_jp": name.get("jp", ""),
+                    "reason": description.get("zh", "可作為台東區在地美食體驗選擇。"),
+                    "sdg_tags": spot.get("sdg_tags", []),
+                    "crowd_level": self._normalize_crowd_level(spot),
+                    "crowd_reason": spot.get("crowd_reason", ""),
+                }
+            )
+
+            if len(recommendations) >= limit:
+                break
+
+        return recommendations
 
     def _build_system_prompt(self, context: str) -> str:
         return f"""

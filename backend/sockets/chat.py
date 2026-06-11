@@ -45,15 +45,21 @@ def register_chat_socket(socketio: SocketIO) -> None:
                 session_id=session_id,
                 user_query=message,
             )
+            sources = rag_service.get_last_sources()
+            recommendations = rag_service.get_last_recommendations()
             print(f"[SocketIO] ai_response session_id={session_id}")
         except Exception as error:
             print(f"[SocketIO] RAG error session_id={session_id}: {error}")
             answer = "AI 永續旅伴目前處理失敗，請稍後再試，或確認後端 API Key 與 MongoDB 連線設定。"
+            sources = []
+            recommendations = []
 
         # 回傳 AI 回覆給前端；ai_response 是正式事件。
         payload = {
             "session_id": session_id,
             "answer": answer,
             "message": answer,
+            "sources": sources,
+            "recommendations": recommendations,
         }
         socketio.emit("ai_response", payload)
