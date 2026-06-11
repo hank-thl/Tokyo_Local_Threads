@@ -282,7 +282,6 @@ const normalizeRecommendations = (recommendations = []) => {
     .map((item) => ({
       id: item.id,
       name: item.name,
-      nameJp: item.name_jp || '',
       reason: item.reason || '可作為台東區在地美食體驗選擇。',
       sdgTags: item.sdg_tags || [],
       crowdLevel: item.crowd_level || 3,
@@ -467,40 +466,43 @@ onUnmounted(() => {
                   <div v-if="msg.recommendations?.length" class="chat-message-content">
                     <p v-html="formatMessage(extractIntroText(msg.text), msg.sources || [])"></p>
 
-                    <div class="mt-4 space-y-4">
+                    <div class="mt-4">
                       <article
                         v-for="recommendation in msg.recommendations"
                         :key="recommendation.id"
-                        class="border-t border-gray-100 pt-3 first:border-t-0 first:pt-0"
+                        class="chat-recommendation-block"
                       >
                         <button
                           type="button"
-                          class="text-left text-base font-bold text-green-700 underline decoration-green-200 underline-offset-4 transition-colors hover:text-green-800"
+                          class="chat-heading chat-recommendation-title"
                           @click.stop="openRecommendation(recommendation)"
                         >
                           {{ recommendation.name }}
                         </button>
-                        <p
-                          v-if="recommendation.nameJp && recommendation.nameJp !== recommendation.name"
-                          class="mt-0.5 text-xs italic tracking-wide text-gray-400"
-                        >
-                          {{ recommendation.nameJp }}
-                        </p>
 
-                        <p class="mt-2">
-                          <span class="font-semibold text-gray-800">推薦理由：</span>{{ recommendation.reason }}
-                        </p>
-                        <p class="mt-1">
-                          <span class="font-semibold text-gray-800">永續標籤：</span>
+                        <div class="chat-list-item">
+                          • <strong>擁擠度</strong>：
+                          {{ recommendation.crowdLevel }}/5
+                          <span v-if="recommendation.crowdReason">，{{ recommendation.crowdReason }}</span>
+                        </div>
+
+                        <div class="chat-list-item">
+                          • <strong>推薦理由</strong>：
+                          {{ recommendation.reason }}
+                        </div>
+
+                        <div class="chat-tag-list">
                           <span v-if="recommendation.sdgTags.length">
-                            {{ recommendation.sdgTags.map(tag => `#${tag}`).join(' ') }}
+                            <span
+                              v-for="tag in recommendation.sdgTags"
+                              :key="`${recommendation.id}-${tag}`"
+                              class="chat-tag-pill"
+                            >
+                              #{{ tag }}
+                            </span>
                           </span>
                           <span v-else>暫無標籤</span>
-                        </p>
-                        <p class="mt-1">
-                          <span class="font-semibold text-gray-800">擁擠度：</span>
-                          {{ recommendation.crowdLevel }}/5<span v-if="recommendation.crowdReason">，{{ recommendation.crowdReason }}</span>
-                        </p>
+                        </div>
                       </article>
                     </div>
 
@@ -602,6 +604,54 @@ onUnmounted(() => {
 
 :deep(.chat-heading:first-child) {
   margin-top: 0;
+}
+
+.chat-recommendation-block {
+  margin-top: 0.95rem;
+}
+
+.chat-recommendation-block:first-child {
+  margin-top: 0;
+}
+
+.chat-recommendation-title {
+  display: block;
+  max-width: 100%;
+  margin-bottom: 0.35rem;
+  text-align: left;
+  font-size: inherit;
+  font-weight: 700;
+  line-height: inherit;
+  color: #166534;
+  text-decoration: underline;
+  text-decoration-color: #bbf7d0;
+  text-underline-offset: 4px;
+}
+
+.chat-recommendation-title:hover {
+  color: #14532d;
+  text-decoration-color: #22c55e;
+}
+
+.chat-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+
+.chat-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  border: 1px solid #dcfce7;
+  border-radius: 999px;
+  background: #f0fdf4;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: #15803d;
 }
 
 :deep(.chat-list-item) {

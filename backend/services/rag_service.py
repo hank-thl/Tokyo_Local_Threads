@@ -194,7 +194,7 @@ class RagService:
                     "id": spot_id,
                     "name": name.get("zh") or name.get("jp") or "未命名店家",
                     "name_jp": name.get("jp", ""),
-                    "reason": description.get("zh", "可作為台東區在地美食體驗選擇。"),
+                    "reason": self._build_recommendation_reason(description),
                     "sdg_tags": spot.get("sdg_tags", []),
                     "crowd_level": self._normalize_crowd_level(spot),
                     "crowd_reason": spot.get("crowd_reason", ""),
@@ -205,6 +205,17 @@ class RagService:
                 break
 
         return recommendations
+
+    def _build_recommendation_reason(self, description: dict) -> str:
+        reason = description.get("zh", "").strip()
+        if not reason:
+            return "可作為台東區在地美食體驗選擇。"
+
+        reason = " ".join(reason.split())
+        if len(reason) <= 120:
+            return reason
+
+        return f"{reason[:120]}..."
 
     def _build_system_prompt(self, context: str) -> str:
         return f"""
