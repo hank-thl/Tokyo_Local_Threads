@@ -41,8 +41,10 @@ class RagService:
         previous_messages = history.messages
         history.add_user_message(user_query)
 
-        # 1. 依照使用者問題，先從 MongoDB 找出相關旅遊文件。
-        relevant_spots = self.spot_repository.get_relevant_spots(user_query)
+        # 1. 依照使用者問題與近期對話，先從 MongoDB 找出相關旅遊文件。
+        # 例如第二輪只說「想要人少一點」時，仍能承接上一輪「我肚子餓」的餐廳需求。
+        retrieval_query = self._build_retrieval_query(user_query, previous_messages)
+        relevant_spots = self.spot_repository.get_relevant_spots(retrieval_query)
 
         # 2. 若相關文件中有 crowd_level 4 或 5 的熱門點，
         #    額外找出相同 SDG 標籤、但 crowd_level 較低的分流候選。
@@ -97,6 +99,14 @@ class RagService:
             google_api_key=api_key,
             temperature=0.4,
         )
+
+    def _build_retrieval_query(self, user_query: str, previous_messages: list) -> str:
+        recent_human_messages = []
+        for message in previous_messages[-6:]:
+            if message.type == "human" and message.content:
+                recent_human_messages.append(message.content)
+
+        return " ".join([*recent_human_messages, user_query]).strip()
 
     def _find_diversion_spots(self, relevant_spots: list[dict]) -> list[dict]:
         high_crowd_spots = [
@@ -212,10 +222,24 @@ class RagService:
             return "可作為台東區在地美食體驗選擇。"
 
         reason = " ".join(reason.split())
-        if len(reason) <= 120:
+        first_sentence = self._first_sentence(reason)
+        if 24 <= len(first_sentence) <= 90:
+            return first_sentence
+
+        if len(reason) <= 90:
             return reason
 
-        return f"{reason[:120]}..."
+        return f"{reason[:90]}..."
+
+    def _first_sentence(self, text: str) -> str:
+        sentence_marks = ["。", "！", "？", "!", "?"]
+        end_positions = [
+            text.find(mark) + 1 for mark in sentence_marks if text.find(mark) != -1
+        ]
+        if not end_positions:
+            return text
+
+        return text[: min(end_positions)].strip()
 
     def _build_system_prompt(self, context: str) -> str:
         return f"""
@@ -229,13 +253,17 @@ class RagService:
 5. 啟動「觀光人潮避雷針」時，必須清楚提醒該地點較擁擠，並根據相同或相近 sdg_tags，從「人潮避雷針分流候選」中推薦較不擁擠的替代景點。
 6. 如果 RAG 大抄脈絡沒有足夠資料回答，請明確說明目前資料不足，並改用已提供的資料做保守建議。
 7. 不要輸出資料庫內沒有的價格、精確營業時間、即時排隊狀況或交通細節。
-8. 回覆格式必須清楚分段，請使用以下結構：
+8. crowd_level 是資料推估，不是即時人流；請避免保證「一定不擠」，改用「依資料推估」、「建議避開尖峰」等保守措辭。
+9. 若使用者在多輪對話中補充偏好，例如「想要人少一點」、「想吃甜點」、「不要太遠」，請承接上一輪需求，不要像第一次回答一樣重講完整介紹。
+10. 推薦理由必須短，單一項目最多 1 句、45 字以內。不要直接貼上完整介紹。
+11. 若使用者要求「人少一點」，但 RAG 大抄中最低擁擠度仍是 3/5，請明確說「目前命中資料多為 3/5，我會優先選非地標型、較適合避開尖峰的店家」。
+12. 回覆格式必須清楚分段，請使用以下結構：
    - 先用 1 句話直接回答使用者需求。
    - 接著列出 2 到 3 個推薦項目，每個項目都用「### 名稱」作為小標題，名稱必須完全使用 RAG 大抄脈絡中的「景點/店家名稱」。
-   - 每個推薦項目下方用短行列出「推薦理由」、「永續標籤」、「擁擠度」。
+   - 每個推薦項目下方用短行列出「擁擠度」、「推薦理由」、「永續標籤」。
    - 若需要分流，新增「### 觀光人潮避雷針」段落。
    - 最後用 1 句話詢問使用者下一步偏好。
-9. 不要把所有內容寫成同一段；每個段落之間必須保留換行。
+13. 不要把所有內容寫成同一段；每個段落之間必須保留換行。
 
 RAG 大抄脈絡：
 {context}

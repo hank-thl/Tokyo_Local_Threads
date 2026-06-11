@@ -34,9 +34,33 @@ class SpotRepository:
             raise RuntimeError("MongoDB collection 尚未初始化")
 
         keywords = self._extract_keywords(user_query)
+        category_filter = self._detect_category_filter(user_query)
+        prefers_low_crowd = self._prefers_low_crowd(user_query)
+        base_query = {}
+        if category_filter:
+            base_query["category"] = category_filter
+        if prefers_low_crowd:
+            base_query["crowd_level"] = {"$lte": 3}
+
         if not keywords:
-            cursor = database.documents_collection.find({}).sort("crowd_level", 1).limit(limit)
-            return [self._serialize_document(document) for document in cursor]
+            cursor = (
+                database.documents_collection.find(base_query)
+                .sort([("crowd_level", 1), ("name.zh", 1)])
+                .limit(limit)
+            )
+            documents = [self._serialize_document(document) for document in cursor]
+
+            if not documents and prefers_low_crowd and category_filter:
+                fallback_cursor = (
+                    database.documents_collection.find({"category": category_filter})
+                    .sort([("crowd_level", 1), ("name.zh", 1)])
+                    .limit(limit)
+                )
+                documents = [
+                    self._serialize_document(document) for document in fallback_cursor
+                ]
+
+            return documents
 
         regex_conditions = []
         for keyword in keywords:
@@ -54,7 +78,7 @@ class SpotRepository:
                 ]
             )
 
-        query = {"$or": regex_conditions}
+        query = {**base_query, "$or": regex_conditions}
         cursor = (
             database.documents_collection.find(query)
             .sort([("crowd_level", 1), ("name.zh", 1)])
@@ -65,7 +89,18 @@ class SpotRepository:
         # 若完全沒有命中，回傳較不擁擠的資料作為保底 Context，避免 LLM 沒有根據可回答。
         if not documents:
             fallback_cursor = (
-                database.documents_collection.find({})
+                database.documents_collection.find(base_query)
+                .sort([("crowd_level", 1), ("name.zh", 1)])
+                .limit(limit)
+            )
+            documents = [
+                self._serialize_document(document) for document in fallback_cursor
+            ]
+
+        # 若「人少」條件太嚴導致沒有資料，放寬為同類別資料，但仍依擁擠度排序。
+        if not documents and prefers_low_crowd and category_filter:
+            fallback_cursor = (
+                database.documents_collection.find({"category": category_filter})
                 .sort([("crowd_level", 1), ("name.zh", 1)])
                 .limit(limit)
             )
@@ -123,6 +158,9 @@ class SpotRepository:
             "and",
             "the",
             "to",
+            "人少",
+            "一點",
+            "肚子餓",
         }
 
         keywords = []
@@ -136,6 +174,46 @@ class SpotRepository:
                 keywords.append(normalized)
 
         return keywords[:8]
+
+    def _detect_category_filter(self, user_query: str) -> str | None:
+        food_keywords = {
+            "肚子餓",
+            "吃",
+            "餐廳",
+            "美食",
+            "料理",
+            "午餐",
+            "晚餐",
+            "甜點",
+            "壽司",
+            "拉麵",
+            "咖啡",
+            "小吃",
+            "用餐",
+            "food",
+            "restaurant",
+        }
+        normalized_query = (user_query or "").lower()
+        if any(keyword in normalized_query for keyword in food_keywords):
+            return "restaurant"
+
+        return None
+
+    def _prefers_low_crowd(self, user_query: str) -> bool:
+        low_crowd_keywords = {
+            "人少",
+            "不要太擠",
+            "不想排隊",
+            "避開人潮",
+            "安靜",
+            "清幽",
+            "冷門",
+            "少一點",
+            "less crowded",
+            "quiet",
+        }
+        normalized_query = (user_query or "").lower()
+        return any(keyword in normalized_query for keyword in low_crowd_keywords)
 
     def _serialize_document(self, document: dict) -> dict:
         document["_id"] = str(document["_id"])
