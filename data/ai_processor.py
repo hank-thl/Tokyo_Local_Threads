@@ -40,6 +40,7 @@ SDG_OPTIONS = [
     "跨文化交流",
 ]
 
+# AI 必須補齊這些欄位，才算完成清洗；用於斷點續跑時判斷是否略過。
 REQUIRED_AI_FIELDS = {
     "name_zh",
     "description_zh",
@@ -49,6 +50,8 @@ REQUIRED_AI_FIELDS = {
     "crowd_reason",
 }
 
+# 有些景點文字會提到商店街或市場，但不一定真的和飲食有關。
+# 這組詞用來降低「在地飲食文化」被誤標到一般景點上的機率。
 FOOD_CONTEXT_TERMS = [
     "飲食",
     "食",
@@ -106,6 +109,7 @@ def clean_json_text(text: str) -> str:
 
 
 def has_complete_ai_fields(record: dict) -> bool:
+    # 斷點續跑的判斷條件：已經有完整 AI 欄位的資料不重送 API。
     if "name" not in record or "ui_description" not in record:
         return False
 
@@ -121,6 +125,7 @@ def has_complete_ai_fields(record: dict) -> bool:
 
 
 def normalize_crowd_level(value) -> int:
+    # crowd_level 統一落在 1 到 5，避免 AI 回傳字串或超出範圍。
     try:
         level = int(value)
     except (TypeError, ValueError):
@@ -144,6 +149,7 @@ def has_food_context(raw_document: dict) -> bool:
 
 
 def normalize_sdg_tags(raw_document: dict, tags: list[str]) -> list[str]:
+    # 只接受白名單內的 SDG 標籤，避免資料庫出現過多近義但不同名的標籤。
     normalized_tags = []
     for tag in tags:
         if tag not in SDG_OPTIONS:
@@ -157,6 +163,7 @@ def normalize_sdg_tags(raw_document: dict, tags: list[str]) -> list[str]:
 
 
 def call_gemini(raw_document: dict) -> dict:
+    # 將單筆 raw document 交給 Gemini，轉成前端與 RAG 都能使用的結構化資料。
     client = get_gemini_client()
     category_label = "餐廳/美食店家" if raw_document.get("category") == "restaurant" else "景點"
     food_categories = "、".join(raw_document.get("food_categories", [])) or "無"
@@ -210,6 +217,7 @@ crowd_level 評分規則：
 
 
 def build_final_record(raw_document: dict, ai_data: dict) -> dict:
+    # 最終文件格式會直接匯入 MongoDB documents collection。
     crowd_reason = str(ai_data.get("crowd_reason", "")).strip()
     if len(crowd_reason) > 20:
         crowd_reason = crowd_reason[:20]
@@ -237,6 +245,7 @@ def build_final_record(raw_document: dict, ai_data: dict) -> dict:
 
 
 def upsert_record(records: list[dict], new_record: dict) -> None:
+    # 以 detail_url 當作資料唯一鍵；重新處理時更新原資料而不是新增重複筆。
     detail_url = new_record.get("detail_url")
     for idx, record in enumerate(records):
         if record.get("detail_url") == detail_url:
@@ -267,6 +276,7 @@ def main() -> None:
         for record in results
         if has_complete_ai_fields(record)
     }
+    # 只挑尚未完成 AI 清洗的資料，讓中斷後可以從上次進度繼續。
     pending = [
         raw_document
         for raw_document in raw_documents

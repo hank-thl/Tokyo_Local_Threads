@@ -32,6 +32,7 @@ const messages = ref([
 ])
 
 const getOrCreateSessionId = () => {
+  // 同一個瀏覽器維持固定 session，後端才能接上 MongoDB 裡的多輪對話。
   const existingSessionId = localStorage.getItem(STORAGE_KEY)
   if (existingSessionId) {
     return existingSessionId
@@ -50,6 +51,7 @@ const scrollToBottom = async () => {
 }
 
 const scrollToLastUserMessage = async () => {
+  // AI 回覆可能很長，定位回最後一則使用者訊息，方便從問題往下讀。
   await nextTick()
   if (!chatBodyRef.value) return
 
@@ -104,6 +106,7 @@ const buildNameVariants = (name) => {
 }
 
 const buildSpotLinks = async () => {
+  // 從後端資料建立名稱索引，讓純文字 AI 回覆中的店名也能變成連結。
   try {
     const documents = await fetchDocuments({ limit: 100 })
     mergeSpotLinkDocuments(documents)
@@ -201,6 +204,7 @@ const buildLinksFromDocuments = (documents) => {
 }
 
 const linkSpotNames = (escapedText, sources = []) => {
+  // 先比對較長名稱，避免「淺草雷門店」只連到中間的「雷門」。
   const sourceLinks = buildLinksFromDocuments(sources)
   const links = [...sourceLinks, ...spotLinks.value].sort(
     (a, b) => b.normalizedName.length - a.normalizedName.length
@@ -258,6 +262,7 @@ const handleMessageClick = (event) => {
 }
 
 const openRecommendation = (recommendation) => {
+  // structured recommendations 直接帶 id，比純文字比對更穩定。
   router.push({
     name: 'spot-detail',
     params: {
@@ -306,6 +311,7 @@ const normalizeRecommendations = (recommendations = []) => {
 
 const pushAiMessage = async (text, sources = [], recommendations = []) => {
   if (!text) return
+  // Socket.IO 在重連或 fallback transport 時可能重送，這裡避免畫面出現重複回答。
   if (text === lastAiText.value) {
     isLoading.value = false
     return
@@ -329,6 +335,7 @@ const pushAiMessage = async (text, sources = [], recommendations = []) => {
 }
 
 const connectSocket = () => {
+  // Render / 本地環境都共用這一段，實際 URL 由 VITE_SOCKET_URL 控制。
   socket.value = io(SOCKET_URL, {
     transports: ['websocket', 'polling'],
   })

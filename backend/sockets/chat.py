@@ -21,11 +21,7 @@ def register_chat_socket(socketio: SocketIO) -> None:
 
     @socketio.on("user_message")
     def handle_user_message(data):
-        # 前端預期傳入：
-        # {
-        #   "session_id": "user-or-browser-session-id",
-        #   "message": "使用者問題"
-        # }
+        # 前端送來 session_id 與 message；session_id 用來綁定 MongoDB 對話歷史。
         payload = data or {}
         session_id = payload.get("session_id") or "default_session"
         message = payload.get("message", "").strip()
@@ -63,4 +59,5 @@ def register_chat_socket(socketio: SocketIO) -> None:
             "sources": sources,
             "recommendations": recommendations,
         }
+        # 指定 request.sid，避免把某位使用者的 AI 回覆廣播給所有線上使用者。
         socketio.emit("ai_response", payload, to=request.sid)

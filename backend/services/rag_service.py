@@ -35,37 +35,33 @@ class RagService:
         return self.spot_repository.find_sdg_tags()
 
     def generate_travel_advice(self, session_id: str, user_query: str) -> str:
-        # 先建立對話歷史並取得既有訊息。
-        # 使用者訊息會在 LLM 呼叫前先寫入，避免 AI 失敗時完全沒有監控紀錄。
+        # 一次聊天請求的主流程：
+        # 讀取歷史 -> 改寫查詢 -> 檢索文件 -> 組 Prompt -> 產生回答 -> 寫回歷史。
         history = self._get_chat_history(session_id)
         previous_messages = history.messages
+        # 使用者訊息先落庫，方便之後從 Atlas 追查 Demo 時的實際對話。
         history.add_user_message(user_query)
 
-        # 1. 先用 LLM Query Rewriter 將多輪對話整理成適合檢索的明確查詢。
-        # 例如「我肚子餓」後接「想要人少一點」會被改寫成
-        # 「台東區 人少 避開人潮 餐廳 美食」這類可被 MongoDB regex 命中的查詢。
         llm = self._get_llm()
+        # 使用者常用短句追問，因此先把最近幾輪問題整理成可檢索的完整句子。
         retrieval_query = self._rewrite_retrieval_query(
             llm=llm,
             user_query=user_query,
             previous_messages=previous_messages,
         )
         relevant_spots = self.spot_repository.get_relevant_spots(retrieval_query)
+        # 同品牌分店只保留一筆，避免推薦結果看起來像重複資料。
         relevant_spots = self._dedupe_restaurant_brands(relevant_spots)
 
-        # 2. 若相關文件中有 crowd_level 4 或 5 的熱門點，
-        #    額外找出相同 SDG 標籤、但 crowd_level 較低的分流候選。
+        # 熱門點會額外找低人潮候選，呼應「觀光人潮避雷針」的專題主軸。
         diversion_spots = self._find_diversion_spots(relevant_spots)
         self.last_sources = self._build_sources(relevant_spots + diversion_spots)
         self.last_recommendations = self._build_recommendations(relevant_spots)
 
-        # 3. 將 MongoDB 文件整理成 RAG Context，讓 LLM 只能依據這些資料回答。
+        # 將 MongoDB 文件壓成純文字 context，讓 LLM 的回答有明確資料依據。
         context = self._build_rag_context(relevant_spots, diversion_spots)
-
-        # 4. 建立具備專題核心規則的 System Prompt。
         system_prompt = self._build_system_prompt(context)
 
-        # 5. 呼叫 Gemini。此處使用既有 GOOGLE_API_KEY / GEMINI_API_KEY。
         response = llm.invoke(
             [
                 SystemMessage(content=system_prompt),
@@ -75,7 +71,6 @@ class RagService:
         )
         answer = response.content.strip()
 
-        # 6. 將 AI 回覆存入 MongoDB chat_histories。
         history.add_ai_message(answer)
 
         return answer
@@ -120,6 +115,8 @@ class RagService:
         user_query: str,
         previous_messages: list,
     ) -> str:
+        # Query Rewriter 是檢索前處理，不直接回答使用者。
+        # 目的在於把「人少一點」「海鮮」這類追問補成資料庫比較查得到的查詢。
         fallback_query = self._build_retrieval_query(user_query, previous_messages)
         dialogue = self._format_recent_dialogue(previous_messages, user_query)
 
@@ -144,6 +141,7 @@ class RagService:
             response = llm.invoke([HumanMessage(content=rewrite_prompt)])
             rewritten_query = response.content.strip().splitlines()[0].strip()
         except Exception as error:
+            # 改寫失敗時仍可用原始對話檢索，避免聊天流程中斷。
             print(f"[RAG] Query rewrite failed, fallback to raw query: {error}")
             return fallback_query
 
@@ -167,6 +165,7 @@ class RagService:
         return "\n".join(dialogue_lines)
 
     def _find_diversion_spots(self, relevant_spots: list[dict]) -> list[dict]:
+        # 只有在命中資料本身偏擁擠時才啟動分流，避免每次回答都硬推替代地點。
         high_crowd_spots = [
             spot for spot in relevant_spots if self._normalize_crowd_level(spot) >= 4
         ]
@@ -207,6 +206,7 @@ class RagService:
         return "\n".join(context_blocks)
 
     def _dedupe_restaurant_brands(self, spots: list[dict]) -> list[dict]:
+        # MongoDB 保留所有分店，但單次推薦先做品牌去重，Demo 觀感會更自然。
         deduped_spots = []
         seen_brands = set()
 
@@ -264,6 +264,7 @@ class RagService:
         return sources
 
     def _build_recommendations(self, spots: list[dict], limit: int = 3) -> list[dict]:
+        # 這份結構會直接回給前端，用於把店名做成可點擊的 SpotModal 連結。
         recommendations = []
         seen_ids = set()
         seen_brands = set()

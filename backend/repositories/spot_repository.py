@@ -28,8 +28,8 @@ class SpotRepository:
         return sorted(tag for tag in tags if tag)
 
     def get_relevant_spots(self, user_query: str, limit: int = 8) -> list[dict]:
-        # 從使用者問題中取出關鍵字，針對名稱、介紹、AI 背景與 SDG 標籤做簡單比對。
-        # 目前 documents 同時包含景點與餐廳，因此方法名稱沿用 spot，但實際會回傳所有旅遊文件。
+        # PoC 資料量不大，這裡先用 regex 做輕量檢索。
+        # Query Rewriter 會先把多輪對話整理過，再進到這一層查 MongoDB。
         if database.documents_collection is None:
             raise RuntimeError("MongoDB collection 尚未初始化")
 
@@ -42,6 +42,7 @@ class SpotRepository:
         if prefers_low_crowd:
             base_query["crowd_level"] = {"$lte": 3}
 
+        # 使用者問「還有別的嗎」時，跳過前幾筆，避免一直回同一批餐廳。
         skip_count = 3 if self._wants_more_options(user_query) else 0
 
         if not keywords:
@@ -81,6 +82,8 @@ class SpotRepository:
                 ]
             )
 
+        # category 與 crowd_level 是明確 filter；其他欄位才做文字比對。
+        # 這樣「餐廳 美食」不會直接命中所有 restaurant 文件。
         query = {**base_query, "$or": regex_conditions}
         cursor = (
             database.documents_collection.find(query)
@@ -145,7 +148,7 @@ class SpotRepository:
         return [self._serialize_document(document) for document in cursor]
 
     def _extract_keywords(self, user_query: str) -> list[str]:
-        # 保留中文、日文、英文與數字關鍵字；過短的英文虛詞不納入查詢。
+        # 泛用詞只用來判斷意圖，不拿去 regex 搜尋，否則會讓結果太寬。
         tokens = re.findall(r"[\w\u3040-\u30ff\u3400-\u9fff]+", user_query or "")
         stop_words = {
             "我",
@@ -201,6 +204,7 @@ class SpotRepository:
         return keywords[:8]
 
     def _detect_category_filter(self, user_query: str) -> str | None:
+        # 目前資料只有景點與餐廳兩大類；先把吃飯相關問題收斂到 restaurant。
         food_keywords = {
             "肚子餓",
             "吃",
@@ -225,6 +229,7 @@ class SpotRepository:
         return None
 
     def _prefers_low_crowd(self, user_query: str) -> bool:
+        # 使用者明確想避開人潮時，優先挑 crowd_level 較低的資料。
         low_crowd_keywords = {
             "人少",
             "不要太擠",
