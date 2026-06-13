@@ -438,7 +438,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+  <div class="fixed inset-x-0 bottom-0 z-50 flex flex-col items-end sm:inset-x-auto sm:bottom-6 sm:right-6">
     <transition
       enter-active-class="transition ease-out duration-300"
       enter-from-class="opacity-0 translate-y-5"
@@ -449,7 +449,7 @@ onUnmounted(() => {
     >
       <section
         v-if="isOpen"
-        class="mb-4 flex h-[560px] w-[390px] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl"
+        class="flex h-[100dvh] w-full flex-col overflow-hidden border border-gray-100 bg-white shadow-2xl sm:mb-4 sm:h-[560px] sm:w-[390px] sm:rounded-2xl"
       >
         <header class="flex items-center justify-between bg-green-700 px-5 py-4 text-white">
           <div>
@@ -468,7 +468,7 @@ onUnmounted(() => {
           </button>
         </header>
 
-        <div ref="chatBodyRef" class="flex-1 overflow-y-auto bg-gray-50 p-5" @click="handleMessageClick">
+        <div ref="chatBodyRef" class="flex-1 overflow-y-auto bg-gray-50 p-4 sm:p-5" @click="handleMessageClick">
           <div class="flex flex-col gap-4">
             <div
               v-for="(msg, index) in messages"
@@ -478,7 +478,7 @@ onUnmounted(() => {
             >
               <div
                 :class="[
-                  'max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm',
+                  'max-w-[88%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm sm:max-w-[82%]',
                   msg.sender === 'user'
                     ? 'rounded-tr-sm bg-green-600 text-white'
                     : 'rounded-tl-sm border border-gray-100 bg-white text-gray-800',
@@ -590,7 +590,7 @@ onUnmounted(() => {
     <button
       v-if="!isOpen"
       type="button"
-      class="flex h-16 w-16 items-center justify-center rounded-full bg-green-600 text-white shadow-2xl transition-all hover:scale-105 hover:bg-green-700"
+      class="mb-4 mr-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-600 text-white shadow-2xl transition-all hover:scale-105 hover:bg-green-700 sm:mb-0 sm:mr-0 sm:h-16 sm:w-16"
       aria-label="開啟 AI 永續旅伴"
       @click="isOpen = true"
     >
