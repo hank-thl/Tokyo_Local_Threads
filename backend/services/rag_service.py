@@ -1,4 +1,6 @@
+import json
 import os
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -43,13 +45,17 @@ class RagService:
         history.add_user_message(user_query)
 
         llm = self._get_llm()
-        # 使用者常用短句追問，因此先把最近幾輪問題整理成可檢索的完整句子。
-        retrieval_query = self._rewrite_retrieval_query(
+        # 使用者常用短句追問，因此先把最近幾輪問題整理成結構化檢索計畫。
+        retrieval_plan = self._build_retrieval_plan(
             llm=llm,
             user_query=user_query,
             previous_messages=previous_messages,
         )
-        relevant_spots = self.spot_repository.get_relevant_spots(retrieval_query)
+        relevant_spots = self.spot_repository.get_relevant_spots(
+            retrieval_plan["search_query"],
+            category_override=retrieval_plan["category"],
+            prefers_low_crowd_override=retrieval_plan["prefer_low_crowd"],
+        )
         # 同品牌分店只保留一筆，避免推薦結果看起來像重複資料。
         relevant_spots = self._dedupe_restaurant_brands(relevant_spots)
 
@@ -109,29 +115,37 @@ class RagService:
 
         return " ".join([*recent_human_messages, user_query]).strip()
 
-    def _rewrite_retrieval_query(
+    def _build_retrieval_plan(
         self,
         llm: ChatGoogleGenerativeAI,
         user_query: str,
         previous_messages: list,
-    ) -> str:
-        # Query Rewriter 是檢索前處理，不直接回答使用者。
-        # 目的在於把「人少一點」「海鮮」這類追問補成資料庫比較查得到的查詢。
+    ) -> dict:
+        # Query Planner 是檢索前處理，不直接回答使用者。
+        # 它輸出結構化欄位，避免單靠關鍵字猜 category 造成餐廳/景點混淆。
         fallback_query = self._build_retrieval_query(user_query, previous_messages)
         dialogue = self._format_recent_dialogue(previous_messages, user_query)
 
         rewrite_prompt = f"""
-你是 RAG 系統的「查詢改寫器」，不是聊天助理。
-請根據最近對話，把使用者真正想找的東京台東區旅遊需求，改寫成一行適合 MongoDB 關鍵字檢索的繁體中文查詢。
+你是 RAG 系統的「檢索規劃器」，不是聊天助理。
+請根據最近使用者訊息，輸出一個 JSON，讓後端可以查詢東京台東區旅遊資料庫。
 
-改寫規則：
-1. 只能輸出查詢文字，不要回答使用者，不要加標點說明。
-2. 必須保留使用者提到的地名、店名、景點名、料理類型、SDG 偏好與擁擠度偏好。
-3. 若使用者想吃、肚子餓、找美食，查詢中要包含「餐廳 美食」。
-4. 若使用者想逛、拍照、文化體驗，查詢中要包含「景點 文化體驗」。
-5. 若使用者想人少、安靜、避開排隊，查詢中要包含「人少 避開人潮 低擁擠」。
-6. 若當前句子很短，必須承接前文補足需求。
-7. 長度控制在 60 個中文字以內。
+輸出格式：
+{{
+  "search_query": "適合 MongoDB 文字檢索的一行繁體中文查詢",
+  "category": "spot | restaurant | null",
+  "prefer_low_crowd": true
+}}
+
+規則：
+1. 只能輸出 JSON，不要 Markdown，不要解釋。
+2. category 只能是 "spot"、"restaurant" 或 null。
+3. 使用者最後一句如果明確指定「景點」，category 必須是 "spot"，即使前文在聊餐廳。
+4. 使用者最後一句如果明確指定「餐廳、美食、吃」，category 必須是 "restaurant"，即使前文在聊景點。
+5. 若最後一句只是「人少一點」「海鮮」這類補充，才承接前文 category。
+6. 使用者想人少、安靜、避開排隊、低擁擠時，prefer_low_crowd 必須是 true。
+7. search_query 保留具辨識度的詞，例如地名、店名、料理類型、文化體驗、SDG 偏好；不要只輸出「餐廳 美食」這種泛用詞。
+8. search_query 長度控制在 60 個中文字以內。
 
 最近使用者訊息：
 {dialogue}
@@ -139,17 +153,33 @@ class RagService:
 
         try:
             response = llm.invoke([HumanMessage(content=rewrite_prompt)])
-            rewritten_query = response.content.strip().splitlines()[0].strip()
+            plan = json.loads(self._clean_json_text(response.content))
         except Exception as error:
-            # 改寫失敗時仍可用原始對話檢索，避免聊天流程中斷。
-            print(f"[RAG] Query rewrite failed, fallback to raw query: {error}")
-            return fallback_query
+            # 規劃失敗時仍可用原始對話檢索，避免聊天流程中斷。
+            print(f"[RAG] Query planning failed, fallback to raw query: {error}")
+            return {
+                "search_query": fallback_query,
+                "category": None,
+                "prefer_low_crowd": None,
+            }
 
-        if not rewritten_query:
-            return fallback_query
+        category = plan.get("category")
+        if category not in ("spot", "restaurant"):
+            category = None
 
-        print(f"[RAG] rewritten query: {rewritten_query}")
-        return rewritten_query
+        retrieval_plan = {
+            "search_query": str(plan.get("search_query") or fallback_query).strip(),
+            "category": category,
+            "prefer_low_crowd": bool(plan.get("prefer_low_crowd", False)),
+        }
+        print(f"[RAG] retrieval plan: {retrieval_plan}")
+        return retrieval_plan
+
+    def _clean_json_text(self, text: str) -> str:
+        text = text.strip()
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        return text.strip()
 
     def _format_recent_dialogue(self, previous_messages: list, user_query: str) -> str:
         dialogue_lines = []

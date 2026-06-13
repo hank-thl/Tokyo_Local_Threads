@@ -27,15 +27,25 @@ class SpotRepository:
         tags = database.documents_collection.distinct("sdg_tags")
         return sorted(tag for tag in tags if tag)
 
-    def get_relevant_spots(self, user_query: str, limit: int = 8) -> list[dict]:
+    def get_relevant_spots(
+        self,
+        user_query: str,
+        limit: int = 8,
+        category_override: str | None = None,
+        prefers_low_crowd_override: bool | None = None,
+    ) -> list[dict]:
         # PoC 資料量不大，這裡先用 regex 做輕量檢索。
         # Query Rewriter 會先把多輪對話整理過，再進到這一層查 MongoDB。
         if database.documents_collection is None:
             raise RuntimeError("MongoDB collection 尚未初始化")
 
         keywords = self._extract_keywords(user_query)
-        category_filter = self._detect_category_filter(user_query)
-        prefers_low_crowd = self._prefers_low_crowd(user_query)
+        category_filter = category_override or self._detect_category_filter(user_query)
+        prefers_low_crowd = (
+            prefers_low_crowd_override
+            if prefers_low_crowd_override is not None
+            else self._prefers_low_crowd(user_query)
+        )
         base_query = {}
         if category_filter:
             base_query["category"] = category_filter
