@@ -1,3 +1,4 @@
+from flask import request
 from flask_socketio import SocketIO
 
 try:
@@ -35,7 +36,7 @@ def register_chat_socket(socketio: SocketIO) -> None:
                 "answer": "請輸入想詢問的旅遊需求。",
                 "message": "請輸入想詢問的旅遊需求。",
             }
-            socketio.emit("ai_response", payload)
+            socketio.emit("ai_response", payload, to=request.sid)
             return
 
         print(f"[SocketIO] user_message session_id={session_id} message={message}")
@@ -62,4 +63,4 @@ def register_chat_socket(socketio: SocketIO) -> None:
             "sources": sources,
             "recommendations": recommendations,
         }
-        socketio.emit("ai_response", payload)
+        socketio.emit("ai_response", payload, to=request.sid)
