@@ -195,13 +195,13 @@ data/taito_documents.json
 目前資料量：
 
 ```text
-raw_documents.json: 101 筆
+raw_documents.json: 105 筆
 - spot: 50
-- restaurant: 51
+- restaurant: 55
 
-taito_documents.json: 30 筆
-- spot: 20
-- restaurant: 10
+taito_documents.json: 105 筆
+- spot: 50
+- restaurant: 55
 ```
 
 ### 4. 啟動 Flask 後端
